@@ -27,11 +27,13 @@ W_FID = 0.0001
 W_DIFF = 0.0
 CUDA_NUM = 0
 BATCH_SIZE = 1024
-W_ACROSS_RKD = 0.1
+
+W_ARKD = 0.1
+W_AINV = 0.1
+W_AINVINV = 1.0
 
 
-
-WANDB_NAME=f"1112_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_acrossW{W_ACROSS_RKD}"
+WANDB_NAME=f"1112_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_arkdW{W_ARKD}_ainvW{W_AINV}_ainvinvW{W_AINVINV}"
 
 
 CONFIG = {
@@ -52,7 +54,9 @@ CONFIG = {
     "W_INVINV": W_INVINV,                               # ε-pred MSE 가중치
     "W_DIFF": W_DIFF,                               # ε-pred MSE 가중치
     "W_FID": W_FID,                               # ε-pred MSE 가중치
-    "W_ACROSS_RKD": W_ACROSS_RKD,
+    "W_ARKD": W_ARKD,
+    "W_AINV": W_AINV,                               # ε-pred MSE 가중치
+    "W_AINVINV": W_AINVINV, 
 
     "rkd_ddim_steps_to_t": 100,   # t_sel까지 최대 몇 번의 DDIM 전이만 사용할지
 
@@ -782,7 +786,6 @@ def train_student_uniform_xt(cfg: Dict):
         inversion_loss = torch.tensor(0.0, device=device)
         invinv_loss = torch.tensor(0.0, device=device)
         fid_loss = torch.tensor(0.0, device=device)
-        across_rkd_loss = torch.tensor(0.0, device=device)
 
         diff_loss = torch.tensor(0.0, device=device)
         
@@ -835,7 +838,12 @@ def train_student_uniform_xt(cfg: Dict):
             invinv_loss += cfg["W_INVINV"] * F.mse_loss(invinv_s_d, invinv_t_d, reduction="mean") / len(xt_S_seq)
             fid_loss += cfg["W_FID"] * (fid_student + fid_teacher) / len(xt_S_seq)
             
+        ##################  ACROSS RKD LOSSES ##################
 
+        Arkd_loss = torch.tensor(0.0, device=device)
+        Ainversion_loss = torch.tensor(0.0, device=device)
+        Ainversion_2_loss = torch.tensor(0.0, device=device)
+        Ainvinv_loss = torch.tensor(0.0, device=device)
 
         for i in range(len(xt_S_seq)-1):
 
@@ -844,28 +852,59 @@ def train_student_uniform_xt(cfg: Dict):
             xt_T_i = denormalize_torch(xt_T_seq[i], mu_teacher_tensor, sigma_teacher_tensor)
             xt_T_i_1 = denormalize_torch(xt_T_seq[i+1], mu_teacher_tensor, sigma_teacher_tensor)
 
+            xt_S_inv_i = denormalize_torch(list(reversed(S_inv_z_seq[:-1]))[i], mu_student_tensor, sigma_student_tensor)
+            xt_S_inv_i_1 = denormalize_torch(list(reversed(S_inv_z_seq[:-1]))[i+1], mu_student_tensor, sigma_student_tensor)
+            xt_T_inv_i = denormalize_torch(x0_inv_T[i], mu_teacher_tensor, sigma_teacher_tensor)
+            xt_T_inv_i_1 = denormalize_torch(x0_inv_T[i+1], mu_teacher_tensor, sigma_teacher_tensor)
+
+
+
             # ACROSS RKD
-            across_s_full = torch.cdist(xt_S_i, xt_S_i_1, p=2)  
-            across_t_full = torch.cdist(xt_T_i, xt_T_i_1, p=2)  
-            across_s_d = across_s_full.reshape(-1).clamp_min(1e-12)            
-            across_t_d = across_t_full.reshape(-1).clamp_min(1e-12)
+            across_rkd_s_full = torch.cdist(xt_S_i, xt_S_i_1, p=2)  
+            across_rkd_t_full = torch.cdist(xt_T_i, xt_T_i_1, p=2)  
+            across_rkd_s_d = across_rkd_s_full.reshape(-1).clamp_min(1e-12)            
+            across_rkd_t_d = across_rkd_t_full.reshape(-1).clamp_min(1e-12) 
+            # ACROSS INV
+            across_inv_s_full = torch.cdist(xt_S_i, xt_S_inv_i_1, p=2)  
+            across_inv_t_full = torch.cdist(xt_T_i, xt_T_inv_i_1, p=2)  
+            across_inv_s_d = across_inv_s_full.reshape(-1).clamp_min(1e-12)            
+            across_inv_t_d = across_inv_t_full.reshape(-1).clamp_min(1e-12)
+            # ACROSS INV_2
+            across_inv_s_full_2 = torch.cdist(xt_S_inv_i, xt_S_i_1, p=2)  
+            across_inv_t_full_2 = torch.cdist(xt_T_inv_i, xt_T_i_1, p=2)  
+            across_inv_s_d_2 = across_inv_s_full_2.reshape(-1).clamp_min(1e-12)            
+            across_inv_t_d_2 = across_inv_t_full_2.reshape(-1).clamp_min(1e-12)
+            # ACROSS INVINV
+            across_invinv_s_full = torch.cdist(xt_S_inv_i, xt_S_inv_i_1, p=2)  
+            across_invinv_t_full = torch.cdist(xt_T_inv_i, xt_T_inv_i_1, p=2)  
+            across_invinv_s_d = across_invinv_s_full.reshape(-1).clamp_min(1e-12)            
+            across_invinv_t_d = across_invinv_t_full.reshape(-1).clamp_min(1e-12) 
 
             # mean normalization 
             # teacher mean
-            teacher_sum = across_t_d.sum() 
-            teacher_cnt = across_t_d.numel() 
+            teacher_sum = across_rkd_t_d.sum() + across_inv_t_d.sum() + across_inv_t_d_2.sum() + across_invinv_t_d.sum()
+            teacher_cnt = across_rkd_t_d.numel() + across_inv_t_d.numel() + across_inv_t_d_2.numel() + across_invinv_t_d.numel()
             teacher_mean = teacher_sum / teacher_cnt  
             # student mean
-            student_sum = across_s_d.sum() 
-            student_cnt = across_s_d.numel()
+            student_sum = across_rkd_s_d.sum() + across_inv_s_d.sum() + across_inv_s_d_2.sum() + across_invinv_s_d.sum()
+            student_cnt = across_rkd_s_d.numel() + across_inv_s_d.numel() + across_inv_s_d_2.numel() + across_invinv_s_d.numel()
             student_mean = student_sum / student_cnt  
 
-            across_s_d = across_s_d / student_mean
-            across_t_d = across_t_d / teacher_mean
+            across_rkd_s_d = across_rkd_s_d / student_mean
+            across_rkd_t_d = across_rkd_t_d / teacher_mean
+            across_inv_s_d = across_inv_s_d / student_mean
+            across_inv_t_d = across_inv_t_d / teacher_mean
+            across_inv_s_d_2 = across_inv_s_d_2 / student_mean
+            across_inv_t_d_2 = across_inv_t_d_2 / teacher_mean
+            across_invinv_s_d = across_invinv_s_d / student_mean
+            across_invinv_t_d = across_invinv_t_d / teacher_mean
 
 
-            across_rkd_loss += cfg["W_ACROSS_RKD"] * F.mse_loss(across_s_d, across_t_d, reduction="mean") / len(xt_S_seq)
-
+            Arkd_loss += cfg["W_ARKD"] * F.mse_loss(across_rkd_s_d, across_rkd_t_d, reduction="mean") / len(xt_S_seq)
+            Ainversion_loss += cfg["W_AINV"] * (F.mse_loss(across_inv_s_d, across_inv_t_d, reduction="mean")) / len(xt_S_seq) / 2
+            Ainversion_2_loss += cfg["W_AINV"] * (F.mse_loss(across_inv_s_d_2, across_inv_t_d_2, reduction="mean")) / len(xt_S_seq) / 2
+            Ainvinv_loss += cfg["W_AINVINV"] * F.mse_loss(across_invinv_s_d, across_invinv_t_d, reduction="mean") / len(xt_S_seq)
+            
 
         # # ===================== NEW: diffusion ε-MSE loss =====================
         # t_b_s = torch.randint(low=0, high=T, size=(x0_batch.shape[0],), device=device, dtype=torch.long)
@@ -878,7 +917,7 @@ def train_student_uniform_xt(cfg: Dict):
 
 
         ################## TOTAL LOSS ##################
-        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss
+        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss + Arkd_loss + Ainversion_loss + Ainversion_2_loss + Ainvinv_loss
 
 
         opt.zero_grad()
@@ -889,7 +928,7 @@ def train_student_uniform_xt(cfg: Dict):
 
         # if (step_i % max(1, total_steps // 20) == 0) or (step_i == 1):
         if (step_i % 5 == 0) or (step_i == 1):
-            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  across_rkd={across_rkd_loss.item():.6f}  total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  Arkd={Arkd_loss.item():.6f}  Ainv={Ainversion_loss.item():.6f}   Ainv2={Ainversion_2_loss.item():.6f}   Ainvinv={Ainvinv_loss.item():.6f}  total={loss.item():.6f}")
 
 
         if cfg["use_wandb"]:
@@ -902,7 +941,10 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss/invinv": float(invinv_loss),
                 "loss/fid": float(fid_loss),
                 "loss/diff_loss": float(diff_loss),
-                "loss/across_rkd": float(across_rkd_loss),
+                "loss/Arkd": float(Arkd_loss),
+                "loss/Ainv": float(Ainversion_loss),
+                "loss/Ainv_2": float(Ainversion_2_loss),
+                "loss/Ainvinv": float(Ainvinv_loss),
                 "lr": opt.param_groups[0]["lr"],
             }, step=step_i)
 
@@ -914,7 +956,10 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss_raw/invinv": float(invinv_loss) / cfg["W_INVINV"] if cfg["W_INVINV"] != 0 else 0.0,
                 "loss_raw/fid": float(fid_loss) / cfg["W_FID"] if cfg["W_FID"] != 0 else 0.0,
                 "loss_raw/diff_loss": float(diff_loss) / cfg["W_DIFF"] if cfg["W_DIFF"] != 0 else 0.0,
-                "loss_raw/across_rkd": float(across_rkd_loss) / cfg["W_ACROSS_RKD"] if cfg["W_ACROSS_RKD"] != 0 else 0.0,
+                "loss_raw/Arkd": float(Arkd_loss) / cfg["W_ARKD"] if cfg["W_ARKD"] != 0 else 0.0,
+                "loss_raw/Ainv": float(Ainversion_loss) / cfg["W_AINV"] * 2 if cfg["W_AINV"] != 0 else 0.0,
+                "loss_raw/Ainv_2": float(Ainversion_2_loss) / cfg["W_AINV"] * 2 if cfg["W_AINV"] != 0 else 0.0,
+                "loss_raw/Ainvinv": float(Ainvinv_loss) / cfg["W_AINVINV"] if cfg["W_AINVINV"] != 0 else 0.0,
             }, step=step_i)
 
         # 7) (옵션) 시각화: 그대로 유지 (원 코드와 동일)

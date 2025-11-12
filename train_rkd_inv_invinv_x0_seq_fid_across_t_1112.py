@@ -878,7 +878,7 @@ def train_student_uniform_xt(cfg: Dict):
 
 
         ################## TOTAL LOSS ##################
-        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss
+        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss + across_rkd_loss
 
 
         opt.zero_grad()
