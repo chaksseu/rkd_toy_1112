@@ -23,9 +23,9 @@ import itertools
 W_RKD = 0.1
 W_INV = 0.1
 W_INVINV = 1.0
-W_FID = 0.0000000001
+W_FID = 0.1
 W_DIFF = 0.0
-CUDA_NUM = 3
+CUDA_NUM = 7
 BATCH_SIZE = 1024
 
 WANDB_NAME=f"1112_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}"
@@ -988,6 +988,9 @@ def train_student_uniform_xt(cfg: Dict):
             xt_S_H, _      = H_module(xt_S,     t=torch.full((xt_S.shape[0],),     t_cur, device=device, dtype=torch.long))
             xt_S_inv_H, _  = H_module(xt_S_inv, t=torch.full((xt_S_inv.shape[0],), t_cur, device=device, dtype=torch.long))
 
+            xt_S = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
+            xt_S_inv = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
+
             xt_S_H = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
             xt_T = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
             xt_S_inv_H = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
@@ -1023,7 +1026,7 @@ def train_student_uniform_xt(cfg: Dict):
             invinv_t_d = invinv_t_d / teacher_mean
 
             # FID
-            fid_student = fid_gaussian_torch(xt_S_H, xt_S_inv_H)
+            fid_student = fid_gaussian_torch(xt_S, xt_S_inv)
             fid_teacher = fid_gaussian_torch(xt_T, xt_T_inv) 
 
             # loss
