@@ -23,7 +23,7 @@ import itertools
 W_RKD = 0.1
 W_INV = 0.1
 W_INVINV = 1.0
-W_FID = 0.0000001
+W_FID = 0.0000000001
 W_DIFF = 0.0
 CUDA_NUM = 3
 BATCH_SIZE = 1024
