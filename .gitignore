@@ -10,11 +10,11 @@ logs/
 *.pt
 *.pth
 *.ckpt
-*.npz
+# *.npz
 *.png
 *.jpg
 *.safetensors
-*.json
+# *.json
 
 # 기타 개발 환경/캐시
 __pycache__/
