@@ -5,6 +5,7 @@ data/
 ddpm_cifar10_rgb/
 checkpoints/
 logs/
+runs/
 
 # 파일 확장자
 *.pt

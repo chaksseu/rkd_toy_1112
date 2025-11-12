@@ -25,10 +25,10 @@ W_INV = 0.1
 W_INVINV = 1.0
 W_FID = 0.0001
 W_DIFF = 0.0
-CUDA_NUM = 2
+CUDA_NUM = 0
 BATCH_SIZE = 1024
 
-WANDB_NAME=f"1107_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}"
+WANDB_NAME=f"1112_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}"
 
 
 CONFIG = {
@@ -41,7 +41,7 @@ CONFIG = {
     # "student_init_ckpt": "runs/1025_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.0_invW0.0_invinv_W1.0_diffW0.1/ckpt_student_step200000.pt",                     
     "resume_student_ckpt": f"",        
     "teacher_data_stats": "smile_data_n8192_scale10_rot0_trans_0_0/teacher_normalization_stats.json",
-    "student_data_stats": "smile_data_n32_scale2_rot60_trans_50_-20/normalization_stats.json",
+    "student_data_stats": "smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/normalization_stats.json",
 
     # diffusion loss 가중치
     "W_RKD": W_RKD,
@@ -80,13 +80,18 @@ CONFIG = {
     "ddim_eta": 0.0,
     # wandb
     "use_wandb": True,
-    "wandb_project": "RKD-DKDM-AICA-1107",
+    "wandb_project": "RKD-DKDM-AICA-1112-H",
     "wandb_run_name": WANDB_NAME,
+
+    "use_learnable_H": True,
+    "H_init": [1,0,0,  0,1,0,  0,0,1],     # 초기값(I)
+    "H_eps": 1e-6,                        # w 분모 안정화
+    "resume_H_ckpt": "",                  # (옵션) H만 재개 로드 경로
 }
 
 CONFIG.update({
     # student 데이터 경로/형식
-    "student_data_path": "smile_data_n32_scale2_rot60_trans_50_-20/train.npy",   # 혹은 .csv
+    "student_data_path": "smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/train.npy",   # 혹은 .csv
     # "student_data_path": "smile_data_n8192_scale10_rot0_trans_0_0/train.npy",   # 혹은 .csv
     "student_data_format": "npy",                # "npy" | "csv"
     "student_dataset_batch_size": 32,          # 없으면 batch_size 사용
@@ -139,6 +144,99 @@ def fid_gaussian_torch(X: torch.Tensor, Y: torch.Tensor, eps: float = 1e-6) -> t
     return (mean_term + trace_term).clamp_min(0.0).to(out_dtype)
 
 
+
+
+def plot_triplet_scatter_colored(
+    left_xy: np.ndarray,      # Teacher (B,2)
+    mid_xy: np.ndarray,       # Student raw (B,2)
+    right_xy: np.ndarray,     # Student + H(t) (B,2)
+    noise_ids: np.ndarray,
+    N_total: int,
+    out_path: Path,
+    titles: Tuple[str, str, str] = (r"Teacher $x_t$", r"Student $x_t$ (raw)", r"Student $x_t$ + H(t)"),
+    dot_size: int = 6,
+    sync_axes: bool = True,
+    pad_ratio: float = 0.05,
+):
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    A = np.asarray(left_xy); B = np.asarray(mid_xy); C = np.asarray(right_xy)
+    assert A.shape == B.shape == C.shape and A.shape[1] == 2, "Expect three (B,2) arrays."
+
+    colors = colors_from_noise_ids(np.asarray(noise_ids), N_total)
+
+    fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.4), sharex=sync_axes, sharey=sync_axes)
+
+    if sync_axes:
+        all_pts = np.vstack([A, B, C])
+        xlim_all, ylim_all = _square_limits_from(all_pts, pad_ratio=pad_ratio)
+
+    for ax, data, title in zip(axes, (A, B, C), titles):
+        ax.scatter(data[:, 0], data[:, 1], s=dot_size, c=colors, edgecolors="none")
+        ax.set_aspect("equal", adjustable="box"); ax.set_title(title)
+        if sync_axes:
+            ax.set_xlim(*xlim_all); ax.set_ylim(*ylim_all)
+        else:
+            xlim, ylim = _square_limits_from(data, pad_ratio=pad_ratio)
+            ax.set_xlim(*xlim); ax.set_ylim(*ylim)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_and_log_xt_triplets_for_all_t(
+    teacher_seq: np.ndarray,   # [K,B,2]
+    student_seq: np.ndarray,   # [K,B,2]
+    studentH_seq: np.ndarray,  # [K,B,2]
+    ts: np.ndarray,            # [K]
+    noise_ids: np.ndarray,     # [B]
+    out_dir: Path,
+    step_i: int,
+    use_wandb: bool = False,
+    subdir_name: str = "xt_triplets",
+    dot_size: int = 6,
+    sync_axes: bool = True,
+):
+    base = out_dir / "figs" / f"{subdir_name}_step{step_i:06d}"
+    base.mkdir(parents=True, exist_ok=True)
+
+    logged = {}
+    for k, t in enumerate(ts):
+        path = base / f"t{int(t):03d}.png"
+        plot_triplet_scatter_colored(
+            left_xy  = teacher_seq[k],
+            mid_xy   = student_seq[k],
+            right_xy = studentH_seq[k],
+            noise_ids=noise_ids,
+            N_total=len(noise_ids),
+            out_path=path,
+            titles=(fr"Teacher $x_t$ (t={int(t)})", fr"Student $x_t$ (raw)", fr"Student $x_t$ + H(t)"),
+            dot_size=dot_size,
+            sync_axes=sync_axes,
+        )
+        if use_wandb:
+            logged[f"img/{subdir_name}/t{int(t):03d}"] = wandb.Image(str(path))
+
+    if use_wandb and logged:
+        wandb.log(logged, step=step_i)
+
+    return base
+
+@torch.no_grad()
+def apply_H_to_seq_per_t(seq_S: np.ndarray, ts: np.ndarray, H_module: nn.Module, device: torch.device) -> np.ndarray:
+    """
+    seq_S: [K,B,2] (numpy, normalized)
+    ts   : [K]     (int timesteps)
+    return: seq_S_H [K,B,2] with H(t) applied per timestep
+    """
+    K, B, _ = seq_S.shape
+    outs = []
+    for k in range(K):
+        t_k = int(ts[k])
+        xk  = torch.from_numpy(seq_S[k]).to(device=device, dtype=torch.float32)   # (B,2)
+        xk_H, _ = H_module(xk, t_k)                                              # (B,2)
+        outs.append(xk_H.detach().cpu().numpy())
+    return np.stack(outs, axis=0)
 
 
 
@@ -393,7 +491,7 @@ def sample_ddim_student(
     local = DDIMScheduler.from_config(sample_scheduler.config)
     local.set_timesteps(sample_steps, device=device)
 
-    xs = []
+    xs, ts = [], []
 
     model.train()
     for i, t in enumerate(local.timesteps):
@@ -406,10 +504,11 @@ def sample_ddim_student(
         x = out.prev_sample
 
         xs.append(x) 
+        ts.append(t_int)
 
         if t_int <= t_sel:
             break
-    return xs
+    return xs, ts
 
 
 @torch.no_grad()
@@ -422,7 +521,7 @@ def sample_ddim_teacher(
     local = DDIMScheduler.from_config(sample_scheduler.config)
     local.set_timesteps(sample_steps, device=device)
 
-    xs = []
+    xs, ts = [], []
 
     model.eval()
     for t in local.timesteps:  # [T-1, ..., 0] 순서
@@ -435,10 +534,11 @@ def sample_ddim_teacher(
         x = out.prev_sample
 
         xs.append(x) 
+        ts.append(t_int)
 
         if t_int <= t_sel:
             break
-    return xs
+    return xs, ts
 
 
 def sample_ddim_teacher_grad(
@@ -450,7 +550,7 @@ def sample_ddim_teacher_grad(
     local = DDIMScheduler.from_config(sample_scheduler.config)
     local.set_timesteps(sample_steps, device=device)
 
-    xs = []
+    xs, ts = [], []
 
     model.eval()
     for t in local.timesteps:  # [T-1, ..., 0] 순서
@@ -463,10 +563,11 @@ def sample_ddim_teacher_grad(
         x = out.prev_sample
 
         xs.append(x) 
+        ts.append(t_int)
 
         if t_int <= t_sel:
             break
-    return xs
+    return xs, ts
 
 
 def sample_ddim_inv_student(
@@ -484,6 +585,7 @@ def sample_ddim_inv_student(
     inv.set_timesteps(sample_steps, device=device)      # [T' - 1, ..., 0]
 
     xs = [x]
+
     model.train()
 
     for t in inv.timesteps:
@@ -491,11 +593,75 @@ def sample_ddim_inv_student(
         latent_in = inv.scale_model_input(x, t)
         eps = model(latent_in, t_b)
         x = inv.step(eps, t, x).prev_sample
-        xs.append(x) 
 
-    return xs  
+        xs.append(x) 
+        
+    return xs
 
 # ===================== MODEL ===================== #
+
+
+class LearnableHomography(nn.Module):
+    """
+    Row-vector convention: [x, y, 1] @ H^T -> [X, Y, W], (x',y')=(X/W, Y/W)
+    H는 각 timestep t마다 다른 3x3 행렬을 학습합니다: shape [T, 3, 3]
+    """
+    def __init__(self, init_9=None, eps: float = 1e-6, T: int = 50, fix_last_row: bool = False):
+        super().__init__()
+        self.T = int(T)
+        self.eps = float(eps)
+        self.fix_last_row = bool(fix_last_row)  # True면 마지막 행을 [0,0,1]로 고정(affine)
+
+        if init_9 is None:
+            I = torch.eye(3, dtype=torch.float32)         # (3,3)
+        else:
+            I = torch.tensor(init_9, dtype=torch.float32).view(3,3)
+
+        # [T,3,3]로 초기화 (모든 t에서 I로 시작)
+        H0 = I.unsqueeze(0).repeat(self.T, 1, 1)          # (T,3,3)
+        self.H = nn.Parameter(H0)                          # learnable
+
+    def _get_Ht(self, t: torch.Tensor) -> torch.Tensor:
+        """
+        t: shape () | (B,) long
+        return: H_t of shape (B,3,3) if t is vector, else (1,3,3)
+        """
+        if isinstance(t, int):
+            t = torch.tensor([t], dtype=torch.long, device=self.H.device)
+        elif torch.is_tensor(t) and t.ndim == 0:
+            t = t.view(1)
+        # index
+        Ht = self.H.index_select(0, t.clamp(min=0, max=self.T-1))  # (B,3,3)
+        if self.fix_last_row:
+            # 마지막 행을 [0,0,1]로 고정 (affine 제약)
+            Ht = Ht.clone()
+            Ht[..., 2, :2] = 0.0
+            Ht[..., 2, 2]  = 1.0
+        return Ht
+
+    def forward(self, xy: torch.Tensor, t) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        xy: (B,2), t: int | () | (B,) long
+        returns: (xy_trans: (B,2), w: (B,1))
+        """
+        B = xy.shape[0]
+        device = xy.device
+        ones = torch.ones(B, 1, device=device, dtype=xy.dtype)
+        homo = torch.cat([xy, ones], dim=-1)              # (B,3)
+
+        if not torch.is_tensor(t):                        # python int
+            t = torch.full((B,), int(t), device=device, dtype=torch.long)
+        elif t.ndim == 0:                                 # scalar tensor
+            t = t.expand(B)
+
+        Ht = self._get_Ht(t)                               # (B,3,3)
+        out = torch.bmm(homo.unsqueeze(1), Ht.transpose(1,2)).squeeze(1)  # (B,3)
+        w   = out[:, 2:3]
+        den = w.sign() * torch.clamp(w.abs(), min=self.eps)
+        xy_t = out[:, :2] / den
+        return xy_t, w
+
+
 
 class SinusoidalTimeEmbedding(nn.Module):
     def __init__(self, dim=64):
@@ -678,7 +844,27 @@ def train_student_uniform_xt(cfg: Dict):
         else:
             print("[INIT] Student from scratch")
 
-    opt = torch.optim.AdamW(student.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+
+    # === Learnable H ===
+    H_module = LearnableHomography(init_9=cfg["H_init"], eps=cfg["H_eps"], T=cfg["T"]).to(device)
+
+    if cfg.get("resume_H_ckpt"):
+        pH = Path(cfg["resume_H_ckpt"])
+        if pH.exists():
+            H_module.load_state_dict(torch.load(pH, map_location=device), strict=True)
+            print("[RESUME] Loaded H:", pH)
+
+    if not cfg.get("use_learnable_H", True):
+        for p in H_module.parameters():
+            p.requires_grad = False
+
+
+    # opt = torch.optim.AdamW(student.parameters(), lr=cfg["lr"], weight_decay=cfg["weight_decay"])
+
+    opt = torch.optim.AdamW(
+        list(student.parameters()) + list(H_module.parameters()),
+        lr=cfg["lr"], weight_decay=cfg["weight_decay"]
+    )
 
     # W&B
     if cfg["use_wandb"]:
@@ -744,35 +930,47 @@ def train_student_uniform_xt(cfg: Dict):
 
 
         with torch.no_grad():
-            xt_T_seq = sample_ddim_teacher(
+            xt_T_seq, ts_seq_T = sample_ddim_teacher(
                 model=teacher, sample_scheduler=ddim, z=z, 
                 device=device, sample_steps=ddim_steps,
                 eta=float(cfg.get("ddim_eta", 0.0)), t_sel=t_sel,
             )
 
         student.train()
-        xt_S_seq = sample_ddim_student(
+        xt_S_seq, ts_seq_S = sample_ddim_student(
             model=student, sample_scheduler=ddim, z=z, 
             device=device, sample_steps=ddim_steps,
             eta=float(cfg.get("ddim_eta", 0.0)), t_sel=t_sel,
         )
 
+        ################## STUDENT DOMAIN DATA (inv) ##################
 
         x0_batch = next_student_batch()  # shape (B_s, 2)
-        student.train()
 
-        # ===================== STUDENT DOMAIN DATA =====================
-        # 학생 도메인 x0 배치 가져오기 (정규화 완료 상태)        
         S_inv_z_seq = sample_ddim_inv_student(
             model=student, sample_scheduler=ddim, x0=x0_batch, 
             device=device, sample_steps=ddim_steps,
             eta=float(cfg.get("ddim_eta", 0.0)),
         )
-        x0_inv_T = sample_ddim_teacher_grad(
+        x0_inv_T_seq, ts_seq_inv_T = sample_ddim_teacher_grad(
             model=teacher, sample_scheduler=ddim, z=S_inv_z_seq[-1], 
             device=device, sample_steps=ddim_steps,
             eta=float(cfg.get("ddim_eta", 0.0)), t_sel=0,
         )
+        student.train()
+
+
+        ################## t 비교 (inv) ##################
+
+
+        # print("#################################################")
+        # print("ts_seq_T:", ts_seq_T)
+        # print("len(ts_seq_T:)", len(ts_seq_T))
+        # print("ts_seq_S:", ts_seq_S)
+        # print("len(ts_seq_S:)", len(ts_seq_S))
+        # print("ts_seq_inv_T:", ts_seq_inv_T)
+        # print("len(ts_seq_inv_T:)", len(ts_seq_inv_T))
+
 
         ##################  RKD LOSSES ##################
 
@@ -784,24 +982,27 @@ def train_student_uniform_xt(cfg: Dict):
         diff_loss = torch.tensor(0.0, device=device)
         
 
-        for i, (xt_S, xt_T, xt_S_inv, xt_T_inv) in enumerate(zip(xt_S_seq, xt_T_seq, reversed(S_inv_z_seq[:-1]), x0_inv_T)):
+        for i, (xt_S, xt_T, xt_S_inv, xt_T_inv) in enumerate(zip(xt_S_seq, xt_T_seq, reversed(S_inv_z_seq[:-1]), x0_inv_T_seq)):
+            
+            t_cur = ts_seq_T[i]
+            xt_S_H, _      = H_module(xt_S,     t=torch.full((xt_S.shape[0],),     t_cur, device=device, dtype=torch.long))
+            xt_S_inv_H, _  = H_module(xt_S_inv, t=torch.full((xt_S_inv.shape[0],), t_cur, device=device, dtype=torch.long))
 
-
-            xt_S = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
+            xt_S_H = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
             xt_T = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
-            xt_S_inv = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
+            xt_S_inv_H = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
             xt_T_inv = denormalize_torch(xt_T_inv, mu_teacher_tensor, sigma_teacher_tensor)
 
             # RKD
-            rkd_s_d = torch.pdist(xt_S, p=2).clamp_min(1e-12)           
+            rkd_s_d = torch.pdist(xt_S_H, p=2).clamp_min(1e-12)           
             rkd_t_d = torch.pdist(xt_T, p=2).clamp_min(1e-12)  
             # INV
-            s_full = torch.cdist(xt_S, xt_S_inv, p=2)  
+            s_full = torch.cdist(xt_S_H, xt_S_inv_H, p=2)  
             t_full = torch.cdist(xt_T, xt_T_inv, p=2)  
             inv_s_d = s_full.reshape(-1).clamp_min(1e-12)            
             inv_t_d = t_full.reshape(-1).clamp_min(1e-12)
             # INVINV
-            invinv_s_d = torch.pdist(xt_S_inv, p=2).clamp_min(1e-12)           
+            invinv_s_d = torch.pdist(xt_S_inv_H, p=2).clamp_min(1e-12)           
             invinv_t_d = torch.pdist(xt_T_inv, p=2).clamp_min(1e-12)  
 
             # mean normalization 
@@ -822,7 +1023,7 @@ def train_student_uniform_xt(cfg: Dict):
             invinv_t_d = invinv_t_d / teacher_mean
 
             # FID
-            fid_student = fid_gaussian_torch(xt_S, xt_S_inv)
+            fid_student = fid_gaussian_torch(xt_S_H, xt_S_inv_H)
             fid_teacher = fid_gaussian_torch(xt_T, xt_T_inv) 
 
             # loss
@@ -850,10 +1051,12 @@ def train_student_uniform_xt(cfg: Dict):
         opt.zero_grad()
         loss.backward()
         if cfg.get("max_grad_norm", 0) > 0:
-            nn.utils.clip_grad_norm_(student.parameters(), cfg["max_grad_norm"])
+            nn.utils.clip_grad_norm_(
+                list(student.parameters()) + list(H_module.parameters()),
+                cfg["max_grad_norm"]
+            )
         opt.step()
 
-        # if (step_i % max(1, total_steps // 20) == 0) or (step_i == 1):
         if (step_i % 5 == 0) or (step_i == 1):
             print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
 
@@ -889,24 +1092,29 @@ def train_student_uniform_xt(cfg: Dict):
 
                 seq_T, ts = collect_xt_seq_ddim(teacher, ddim, z_vis, t_stop=0, return_ts=True, device=device, sample_steps=int(cfg["rkd_ddim_steps_to_t"]))
                 seq_S, _  = collect_xt_seq_ddim(student.eval(), ddim, z_vis, t_stop=0, return_ts=True, device=device, sample_steps=int(cfg["rkd_ddim_steps_to_t"]))
+                seq_S_H   = apply_H_to_seq_per_t(seq_S, ts, H_module, device)
 
                 stride = 1
                 idxs = np.arange(0, len(ts), stride)
                 seq_T_s = seq_T[idxs]
                 seq_S_s = seq_S[idxs]
+                seq_S_H_s = seq_S_H[idxs]
                 ts_s    = ts[idxs]
 
 
                 seq_T_s_plot = denormalize_np(seq_T_s, mu_teacher, sigma_teacher)
                 seq_S_s_plot = denormalize_np(seq_S_s, mu_student, sigma_student)
+                seq_S_H_s_plot = denormalize_np(seq_S_H_s, mu_student, sigma_student)
                 
-                _ = save_and_log_xt_pairs_for_all_t(
-                    left_seq   = seq_T_s_plot,
-                    right_seq  = seq_S_s_plot,
+                _ = save_and_log_xt_triplets_for_all_t(
+                    teacher_seq = seq_T_s_plot,
+                    student_seq = seq_S_s_plot,
+                    studentH_seq= seq_S_H_s_plot,
                     ts         = ts_s,
                     noise_ids  = np.arange(B_plot),
                     out_dir    = out_dir,
                     step_i     = step_i,
+                    subdir_name = "xt_triplets",        # 디렉토리/로그 키 접두사
                     sync_axes  = bool(cfg.get("vis_xt_sync_axes", False)),
                     dot_size   = 6,
                     use_wandb  = bool(cfg["use_wandb"]),
@@ -966,10 +1174,120 @@ def train_student_uniform_xt(cfg: Dict):
                 wandb.log({"img_T/student_samples": wandb.Image(str(png_path))}, step=step_i)
 
 
+            # (2) H(t=0) 적용본
+            with torch.no_grad():
+                x0_s_H, _ = H_module(x0_s, t=torch.zeros(x0_s.shape[0], device=x0_s.device, dtype=torch.long))
+            x0_s_H_plot = denormalize_np(x0_s_H.detach().cpu().numpy(), mu_teacher, sigma_teacher)
+            png_path_H   = figs_dir / f"samples_H_t0_step{step_i:06d}.png"
+
+            plt.figure(figsize=(4, 4))
+            plt.scatter(x0_s_H_plot[:, 0], x0_s_H_plot[:, 1], s=6, edgecolors="none")
+            ax = plt.gca(); ax.set_aspect("equal", adjustable="box")
+            xlim, ylim = _square_limits_from(x0_s_H_plot, pad_ratio=0.05)
+            ax.set_xlim(*xlim); ax.set_ylim(*ylim)
+            plt.title(f"Student samples (x0) with H(t=0) @ step {step_i}")
+            plt.tight_layout(); plt.savefig(png_path_H, dpi=150, bbox_inches="tight"); plt.close()
+
+            if cfg["use_wandb"]:
+                wandb.log({"img_T/student_samples_H": wandb.Image(str(png_path_H))}, step=step_i)
+
+
+
+
+                # --- H matrices full HTML viz over ALL timesteps (paged) ---
+        if cfg.get("use_wandb", False) and ((step_i % cfg["vis_interval_epochs"] == 0) or (step_i == total_steps)):
+            import html
+            with torch.no_grad():
+                eps = 1e-12
+                rows_per_panel = int(cfg.get("H_vis_rows_per_panel", 20))  # 페이지당 행 수
+
+                # [T,3,3] -> CPU float
+                H_all: torch.Tensor = H_module.H.detach().float().cpu()
+                Ttot = int(H_all.shape[0])
+
+                def mat_to_pre(M: torch.Tensor) -> str:
+                    arr = M.numpy()
+                    s = np.array2string(
+                        arr,
+                        formatter={'float_kind': lambda x: f"{x: .5f}"},
+                        max_line_width=200
+                    )
+                    return f"<pre style='margin:0'>{html.escape(s)}</pre>"
+
+                # t=0..T-1 전부 행 생성
+                all_rows = []
+                for t in range(Ttot):
+                    Ht = H_all[t]                                  # (3,3)
+                    Ht_norm = Ht / max(float(Ht[2,2].abs()), eps)   # proj scale 제거
+
+                    # 역행렬(가능하면)
+                    try:
+                        Ht_inv = torch.linalg.inv(Ht)
+                        Ht_inv_norm = Ht_inv / max(float(Ht_inv[2,2].abs()), eps)
+                        inv_html  = mat_to_pre(Ht_inv)
+                        invn_html = mat_to_pre(Ht_inv_norm)
+                    except Exception:
+                        inv_html  = "<pre style='margin:0'>(singular)</pre>"
+                        invn_html = "<pre style='margin:0'>(singular)</pre>"
+
+                    row = f"""
+                    <tr>
+                      <td style="text-align:center;">t = {t}</td>
+                      <td>{mat_to_pre(Ht)}</td>
+                      <td>{mat_to_pre(Ht_norm)}</td>
+                      <td>{inv_html}</td>
+                      <td>{invn_html}</td>
+                    </tr>
+                    """
+                    all_rows.append(row)
+
+                # 페이지로 나눠서 여러 패널로 로깅
+                num_pages = (len(all_rows) + rows_per_panel - 1) // rows_per_panel
+                for p in range(num_pages):
+                    chunk = all_rows[p*rows_per_panel:(p+1)*rows_per_panel]
+                    html_block = f"""
+                    <div style="font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; font-size: 12px;">
+                      <div style="margin-bottom:6px;">H(t) page {p+1}/{num_pages} (rows {p*rows_per_panel}..{min((p+1)*rows_per_panel, len(all_rows))-1})</div>
+                      <table border="1" cellspacing="0" cellpadding="6" style="border-collapse:collapse;">
+                        <thead>
+                          <tr>
+                            <th>timestep</th>
+                            <th>H(t)</th>
+                            <th>H(t) / H(t)[2,2]</th>
+                            <th>H(t)<sup>-1</sup></th>
+                            <th>H(t)<sup>-1</sup> / [2,2]</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {''.join(chunk)}
+                        </tbody>
+                      </table>
+                    </div>
+                    """.strip()
+                    wandb.log({f"H_vis/table_p{p:02d}": wandb.Html(html_block)}, step=step_i)
+
+                # (선택) 간단 통계도 함께
+                dets, conds = [], []
+                for t in range(Ttot):
+                    Ht = H_all[t]
+                    dets.append(torch.det(Ht).item())
+                    try:
+                        conds.append(torch.linalg.cond(Ht).item())
+                    except Exception:
+                        conds.append(float('nan'))
+                wandb.log({
+                    "H_stats/det_mean": float(np.nanmean(dets)),
+                    "H_stats/cond_mean": float(np.nanmean(conds)),
+                }, step=step_i)
+
+
+
+
         # 8) (옵션) 주기적 체크포인트
         if (step_i % (cfg["vis_interval_epochs"]) == 0) or (step_i == total_steps):
             ckpt_path = out_dir / f"ckpt_student_step{step_i:06d}.pt"
             torch.save(student.state_dict(), ckpt_path)
+            torch.save(H_module.state_dict(), out_dir / f"ckpt_H_step{step_i:06d}.pt")
             print("[CKPT]", ckpt_path)
 
     print("\n[DONE] Out dir:", out_dir.resolve())
