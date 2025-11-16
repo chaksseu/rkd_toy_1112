@@ -70,9 +70,9 @@ def save_heatmap(xy: np.ndarray, path: Path, bins: int = 128):
 NUM=32
 def main():
     ap = argparse.ArgumentParser(description="Uniformly sample n points from an existing dataset folder")
-    ap.add_argument("--src_dir", type=str, default="smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2",
+    ap.add_argument("--src_dir", type=str, default="smile_data_n8192_scale10_rot0_trans_0_0",
                     help="input folder containing train.npy (and optional val.npy, *_labels.npy)")
-    ap.add_argument("--out_dir", type=str, default=f"smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n{NUM}",
+    ap.add_argument("--out_dir", type=str, default=f"smile_data_n8192_scale10_rot0_trans_0_0_n{NUM}",
                     help="output folder to save the sampled subset")
     ap.add_argument("--n", type=int, default=NUM, help="number of points to sample")
     ap.add_argument("--split", type=str, default="train", choices=["train", "val", "all"],

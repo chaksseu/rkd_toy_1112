@@ -137,8 +137,8 @@ def maybe_load(path: Path):
 
 def main():
     ap = argparse.ArgumentParser(description="Apply 3x3 homography to 2D dataset(s)")
-    ap.add_argument("--src_dir", type=str, default="smile_data_n8192_scale10_rot0_trans_0_0", help="input folder containing train.npy (and optional val.npy, *_labels.npy)")
-    ap.add_argument("--out_dir", type=str, default="smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2", help="output folder (default: <src_dir>_H)")
+    ap.add_argument("--src_dir", type=str, default="smile_data_n8192_scale10_rot0_trans_0_0_n32", help="input folder containing train.npy (and optional val.npy, *_labels.npy)")
+    ap.add_argument("--out_dir", type=str, default="smile_data_n32_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2", help="output folder (default: <src_dir>_H)")
     ap.add_argument("--csv", action="store_true", help="also save CSVs")
     ap.add_argument("--scatter_dot", type=int, default=6, help="scatter dot size")
     ap.add_argument("--heatmap_bins", type=int, default=128)

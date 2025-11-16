@@ -23,12 +23,13 @@ import itertools
 W_RKD = 0.1
 W_INV = 0.1
 W_INVINV = 1.0
-W_FID = 0.0000000001
+W_PAIR = 0.01
 W_DIFF = 0.0
+W_PAIR = 0.0
 CUDA_NUM = 2
 BATCH_SIZE = 1024
 
-WANDB_NAME=f"1112_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}"
+WANDB_NAME=f"1116_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_pairW{W_PAIR}"
 
 
 CONFIG = {
@@ -41,14 +42,14 @@ CONFIG = {
     # "student_init_ckpt": "runs/1025_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.0_invW0.0_invinv_W1.0_diffW0.1/ckpt_student_step200000.pt",                     
     "resume_student_ckpt": f"",        
     "teacher_data_stats": "smile_data_n8192_scale10_rot0_trans_0_0/teacher_normalization_stats.json",
-    "student_data_stats": "smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/normalization_stats.json",
+    "student_data_stats": "smile_data_n32_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2/normalization_stats.json",
 
     # diffusion loss 가중치
     "W_RKD": W_RKD,
     "W_INV": W_INV,                               # ε-pred MSE 가중치
     "W_INVINV": W_INVINV,                               # ε-pred MSE 가중치
     "W_DIFF": W_DIFF,                               # ε-pred MSE 가중치
-    "W_FID": W_FID,                               # ε-pred MSE 가중치
+    "W_PAIR": W_PAIR,                               # ε-pred MSE 가중치
 
     "rkd_ddim_steps_to_t": 100,   # t_sel까지 최대 몇 번의 DDIM 전이만 사용할지
 
@@ -80,7 +81,7 @@ CONFIG = {
     "ddim_eta": 0.0,
     # wandb
     "use_wandb": True,
-    "wandb_project": "RKD-DKDM-AICA-1112-H",
+    "wandb_project": "RKD-DKDM-AICA-1116-H",
     "wandb_run_name": WANDB_NAME,
 
     "use_learnable_H": True,
@@ -91,7 +92,7 @@ CONFIG = {
 
 CONFIG.update({
     # student 데이터 경로/형식
-    "student_data_path": "smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/train.npy",   # 혹은 .csv
+    "student_data_path": "smile_data_n32_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2/train.npy",   # 혹은 .csv
     # "student_data_path": "smile_data_n8192_scale10_rot0_trans_0_0/train.npy",   # 혹은 .csv
     "student_data_format": "npy",                # "npy" | "csv"
     "student_dataset_batch_size": 32,          # 없으면 batch_size 사용
@@ -977,9 +978,8 @@ def train_student_uniform_xt(cfg: Dict):
         rkd_loss = torch.tensor(0.0, device=device)
         inversion_loss = torch.tensor(0.0, device=device)
         invinv_loss = torch.tensor(0.0, device=device)
-        fid_loss = torch.tensor(0.0, device=device)
 
-        diff_loss = torch.tensor(0.0, device=device)
+        pair_loss = torch.tensor(0.0, device=device)
         
 
         for i, (xt_S, xt_T, xt_S_inv, xt_T_inv) in enumerate(zip(xt_S_seq, xt_T_seq, reversed(S_inv_z_seq[:-1]), x0_inv_T_seq)):
@@ -1033,22 +1033,12 @@ def train_student_uniform_xt(cfg: Dict):
             rkd_loss += cfg["W_RKD"] * F.mse_loss(rkd_s_d, rkd_t_d, reduction="mean") / len(xt_S_seq)
             inversion_loss += cfg["W_INV"] * F.mse_loss(inv_s_d, inv_t_d, reduction="mean") / len(xt_S_seq)
             invinv_loss += cfg["W_INVINV"] * F.mse_loss(invinv_s_d, invinv_t_d, reduction="mean") / len(xt_S_seq)
-            fid_loss += cfg["W_FID"] * (fid_student + fid_teacher) / len(xt_S_seq)
 
 
-
-        # # ===================== NEW: diffusion ε-MSE loss =====================
-        # t_b_s = torch.randint(low=0, high=T, size=(x0_batch.shape[0],), device=device, dtype=torch.long)
-        # eps = torch.randn_like(x0_batch)    
-        # x_t_for_diff = train_sched.add_noise(x0_batch, eps, t_b_s)  # q(x_t|x0, ε, t)
-        # eps_pred = student(x_t_for_diff, t_b_s)  # prediction_type='epsilon'
-
-        # diff_loss += cfg["W_DIFF"] * F.mse_loss(eps_pred, eps, reduction="mean")
-        # # ===============================
 
 
         ################## TOTAL LOSS ##################
-        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss
+        loss = rkd_loss + inversion_loss + invinv_loss + pair_loss
 
 
         opt.zero_grad()
@@ -1061,7 +1051,7 @@ def train_student_uniform_xt(cfg: Dict):
         opt.step()
 
         if (step_i % 5 == 0) or (step_i == 1):
-            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  pair_loss={pair_loss.item():.6f}  total={loss.item():.6f}")
 
 
         if cfg["use_wandb"]:
@@ -1072,8 +1062,7 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss/rkd": float(rkd_loss),
                 "loss/inv": float(inversion_loss),
                 "loss/invinv": float(invinv_loss),
-                "loss/fid": float(fid_loss),
-                "loss/diff_loss": float(diff_loss),
+                "loss/pair": float(pair_loss),
                 "lr": opt.param_groups[0]["lr"],
             }, step=step_i)
 
@@ -1083,7 +1072,7 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss_raw/rkd": float(rkd_loss) / cfg["W_RKD"] if cfg["W_RKD"] != 0 else 0.0,
                 "loss_raw/inv": float(inversion_loss) / cfg["W_INV"] if cfg["W_INV"] != 0 else 0.0,
                 "loss_raw/invinv": float(invinv_loss) / cfg["W_INVINV"] if cfg["W_INVINV"] != 0 else 0.0,
-                "loss_raw/fid": float(fid_loss) / cfg["W_FID"] if cfg["W_FID"] != 0 else 0.0,
+                "loss_raw/pair": float(pair_loss) / cfg["W_PAIR"] if cfg["W_PAIR"] != 0 else 0.0,
                 "loss_raw/diff_loss": float(diff_loss) / cfg["W_DIFF"] if cfg["W_DIFF"] != 0 else 0.0
             }, step=step_i)
 
