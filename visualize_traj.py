@@ -392,21 +392,15 @@ def visualize_student_ddim_trajectories(cfg: dict,
 
     print(f"[DONE] out dir: {out_traj.resolve()}")
 
-# RKD
-# runs/1027_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW1.0_diff0.0/ckpt_student_step080000.pt
-# RKD + DIFF
-# runs/1027_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.1_diff1.0/ckpt_student_step070000.pt
-# RKD + INV + INVINV
-# ckpt_student_step075000_rkd_inv_invinv.pt
-# RKD + INV + INVINV + FD
-# runs/1107_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001/ckpt_student_step110000.pt
+# 1116_lr1e4_n32_H_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_pairW0.01
+# runs/1116_lr1e4_n32_H_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_pairW0.01/ckpt_student_step035000.pt
 
 
 # ===================== ARGS / ENTRY ===================== #
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Student DDIM trajectories + pure score field (norm & denorm).")
     parser.add_argument("--ckpt", type=str,
-        default="runs/1112_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001_arkdW0.1_ainvW0.1_ainvinvW1.0/ckpt_student_step125000.pt",
+        default="runs/1116_lr1e4_n32_H_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_pairW0.001/ckpt_student_step035000.pt",
         help="Path to student checkpoint .pt.")
     parser.add_argument("--n", type=int, default=32, help="Number of pure noise samples.")
     parser.add_argument("--steps", type=int, default=100, help="DDIM sampling steps.")
@@ -414,7 +408,7 @@ def parse_args():
     # bool 인자 (요청대로 str2bool 제거; 단, CLI에서 'False'를 문자열로 주면 True로 해석될 수 있으니 유의)
     parser.add_argument("--frames", type=bool, default=True, help="Save per-timestep frames for both norm/denorm.")
     parser.add_argument("--gif", type=bool, default=True, help="Make GIFs (norm/denorm).")
-    parser.add_argument("--out", type=str, default="vis_traj_rkd_arkdW0.1_ainvW0.1_ainvinvW1.0", help="Output directory root.")
+    parser.add_argument("--out", type=str, default="vis_traj_rkdW0.1_invW0.1_invinvW1.0_pairW0.001", help="Output directory root.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--student-stats", type=str,
                         default=None,

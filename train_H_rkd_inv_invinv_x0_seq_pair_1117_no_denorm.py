@@ -20,14 +20,14 @@ from torch.utils.data import Dataset, DataLoader
 import itertools
 # ===================== CONFIG ===================== #
 
-W_RKD = 0.1
-W_INV = 0.1
-W_FID = 0.0000001
-W_PAIR = 0.001
-CUDA_NUM = 7
+W_RKD = 1.0
+W_INV = 1.0
+W_FID = 0.01
+W_PAIR = 0.01
+CUDA_NUM = 5
 BATCH_SIZE = 1024
 
-WANDB_NAME=f"1117_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_fidW{W_FID}_pairW{W_PAIR}"
+WANDB_NAME=f"1117_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_fidW{W_FID}_pairW{W_PAIR}_no_denorm"
 
 
 CONFIG = {
@@ -1227,20 +1227,20 @@ def train_student_uniform_xt(cfg: Dict):
             xt_S_inv_sam_H, _  = H_module(xt_S_inv_sam, t=torch.full((xt_S_inv.shape[0],), t_cur, device=device, dtype=torch.long))
 
 
-            xt_S_de = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
-            xt_S_inv_de = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
+            # xt_S_de = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
+            # xt_S_inv_de = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
 
-            xt_S_H_de = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
-            xt_T_de = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
-            xt_S_inv_H_de = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
-            xt_T_inv_de = denormalize_torch(xt_T_inv, mu_teacher_tensor, sigma_teacher_tensor)
+            # xt_S_H_de = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
+            # xt_T_de = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
+            # xt_S_inv_H_de = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
+            # xt_T_inv_de = denormalize_torch(xt_T_inv, mu_teacher_tensor, sigma_teacher_tensor)
 
             # RKD
-            rkd_s_d = torch.pdist(xt_S_H_de, p=2).clamp_min(1e-12)           
-            rkd_t_d = torch.pdist(xt_T_de, p=2).clamp_min(1e-12)  
+            rkd_s_d = torch.pdist(xt_S_H, p=2).clamp_min(1e-12)           
+            rkd_t_d = torch.pdist(xt_T, p=2).clamp_min(1e-12)  
             # INV
-            s_full = torch.cdist(xt_S_H_de, xt_S_inv_H_de, p=2)  
-            t_full = torch.cdist(xt_T_de, xt_T_inv_de, p=2)  
+            s_full = torch.cdist(xt_S_H, xt_S_inv_H, p=2)  
+            t_full = torch.cdist(xt_T, xt_T_inv, p=2)  
             inv_s_d = s_full.reshape(-1).clamp_min(1e-12)            
             inv_t_d = t_full.reshape(-1).clamp_min(1e-12)
 
@@ -1260,8 +1260,8 @@ def train_student_uniform_xt(cfg: Dict):
             inv_t_d = inv_t_d / teacher_mean
 
             # FID
-            fid_student = fid_gaussian_torch(xt_S_de, xt_S_inv_de)
-            fid_teacher = fid_gaussian_torch(xt_T_de, xt_T_inv_de) 
+            fid_student = fid_gaussian_torch(xt_S, xt_S_inv)
+            fid_teacher = fid_gaussian_torch(xt_T, xt_T_inv) 
 
             # loss
             rkd_loss += cfg["W_RKD"] * F.mse_loss(rkd_s_d, rkd_t_d, reduction="mean") / len(xt_S_seq)
