@@ -24,7 +24,7 @@ W_RKD = 0.1
 W_INV = 0.1
 W_FID = 0.00000001
 W_PAIR = 0.001
-CUDA_NUM = 7
+CUDA_NUM = 5
 BATCH_SIZE = 1024
 
 WANDB_NAME=f"1117_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_fidW{W_FID}_pairW{W_PAIR}"
@@ -615,6 +615,35 @@ def sample_ddim_teacher(
     return xs, ts
 
 
+@torch.no_grad()
+def sample_ddim_teacher_2(
+    model, sample_scheduler, z, device, sample_steps=None, eta=0.0, t_sel=0,
+):
+    x = z.to(device)
+    B = x.shape[0]
+
+    local = DDIMScheduler.from_config(sample_scheduler.config)
+    local.set_timesteps(sample_steps, device=device)
+
+    xs, ts = [x], []
+
+    model.eval()
+    for t in local.timesteps:  # [T-1, ..., 0] 순서
+        t_int = int(t)
+        
+        t_b = torch.full((B,), t_int, device=device, dtype=torch.long)
+        x_in = local.scale_model_input(x, t)
+        eps = model(x_in, t_b)
+        out = local.step(model_output=eps, timestep=t, sample=x, eta=eta)
+        x = out.prev_sample
+
+        xs.append(x) 
+        ts.append(t_int)
+
+        if t_int <= t_sel:
+            break
+    return xs, ts
+
 def sample_ddim_teacher_grad(
     model, sample_scheduler, z, device, sample_steps=None, eta=0.0, t_sel=0,
 ):
@@ -703,7 +732,34 @@ def sample_ddim_inv_student(
         
     return xs
 
+def sample_ddim_inv_student_2(
+    model, sample_scheduler, x0, device, sample_steps=None, eta=0.0,
+):
+    """
+    DDIM 인버전(eta=0 가정): x_0 -> ... -> x_{T-1}
+    Teacher에 다시 주입할 z를 만들 때 사용.
+    """
+    x = x0.to(device)
+    B = x.shape[0]
 
+    inv = DDIMInverseScheduler.from_config(sample_scheduler.config)
+
+    inv.set_timesteps(sample_steps, device=device)      # [T' - 1, ..., 0]
+
+    xs, ts = [x], [0]
+
+    model.train()
+
+    for t in inv.timesteps:
+        t_b = torch.full((x.shape[0],), int(t), device=device, dtype=torch.long)
+        latent_in = inv.scale_model_input(x, t)
+        eps = model(latent_in, t_b)
+        x = inv.step(eps, t, x).prev_sample
+
+        xs.append(x) 
+        ts.append(int(t)) 
+            
+    return xs, ts
 
 
 # ===================== MODEL ===================== #
@@ -1064,14 +1120,14 @@ def train_student_uniform_xt(cfg: Dict):
 
 
         with torch.no_grad():
-            xt_T_seq, ts_seq_T = sample_ddim_teacher_2(
+            xt_T_seq, ts_seq_T = sample_ddim_teacher(
                 model=teacher, sample_scheduler=ddim, z=z, 
                 device=device, sample_steps=ddim_steps,
                 eta=float(cfg.get("ddim_eta", 0.0)), t_sel=t_sel,
             )
 
         student.train()
-        xt_S_seq, ts_seq_S = sample_ddim_student_2(
+        xt_S_seq, ts_seq_S = sample_ddim_student(
             model=student, sample_scheduler=ddim, z=z, 
             device=device, sample_steps=ddim_steps,
             eta=float(cfg.get("ddim_eta", 0.0)), t_sel=t_sel,
@@ -1086,7 +1142,7 @@ def train_student_uniform_xt(cfg: Dict):
 
         # --- 1. Teacher data -> Teacher inversion  -> z_T ---
         #    (x0_T -> ... -> z_T)
-        T_inv_seq_full = sample_ddim_inv_student(
+        T_inv_seq_full, ts_T_inv_seq_full = sample_ddim_inv_student_2(
             model=teacher,
             sample_scheduler=ddim,
             x0=x0_T_pair,
@@ -1098,10 +1154,10 @@ def train_student_uniform_xt(cfg: Dict):
         # T_inv_seq_full[0] = x0_T, 마지막 = z_T
         z_T = T_inv_seq_full[-1]
         # 시간 순서를 맞추기 위해 noise→x0 방향으로 뒤집기 (기존 코드 패턴과 동일)
-        T_inv_seq = list(reversed(T_inv_seq_full[:]))  # 길이 pair_steps
+        T_inv_seq = list(reversed(T_inv_seq_full[:-1]))  # 길이 pair_steps
 
         # --- 1b. z_T에서 Student sampling (grad O) -> {x_t^{S|T}} ---
-        S_from_T_seq, ts_pair_1 = sample_ddim_student_2(
+        S_from_T_seq, ts_pair_1 = sample_ddim_student(
             model=student,
             sample_scheduler=ddim,
             z=z_T,
@@ -1112,7 +1168,7 @@ def train_student_uniform_xt(cfg: Dict):
         )  # S_from_T_seq: 리스트, 각 원소 (B_pair, 2)
 
         # --- 2. Student data -> Student inversion (grad O) -> z_S ---
-        S_inv_seq_full = sample_ddim_inv_student(
+        S_inv_seq_full, ts_S_inv_seq_full = sample_ddim_inv_student_2(
             model=student,
             sample_scheduler=ddim,
             x0=x0_S_pair,
@@ -1123,10 +1179,10 @@ def train_student_uniform_xt(cfg: Dict):
 
         # S_inv_seq_full[0] = x0_S, 마지막 = z_S
         z_S = S_inv_seq_full[-1]   # 여기서는 grad를 살려둠
-        S_inv_seq = list(reversed(S_inv_seq_full[:]))      # noise→x0 방향, 길이 pair_steps
+        S_inv_seq = list(reversed(S_inv_seq_full[:-1]))      # noise→x0 방향, 길이 pair_steps
 
         # --- 2b. z_S에서 Teacher sampling, Teacher 파라미터는 requires_grad=False) ---
-        T_from_S_seq, ts_pair_2 = sample_ddim_teacher_grad_2(
+        T_from_S_seq, ts_pair_2 = sample_ddim_teacher_grad(
             model=teacher,
             sample_scheduler=ddim,
             z=z_S,
@@ -1143,6 +1199,19 @@ def train_student_uniform_xt(cfg: Dict):
         # S_inv_seq
         # T_from_S_seq
 
+        # print("#########################################")
+        # print("ts_seq_T", ts_seq_T)
+        # print("len", len(ts_seq_T))
+        # print("ts_seq_S", ts_seq_S)
+        # print("len", len(ts_seq_S))
+        # print("ts_pair_1", ts_pair_1)
+        # print("len", len(ts_pair_1))
+        # print("ts_pair_2", ts_pair_2)
+        # print("len", len(ts_pair_2))
+        # print("ts_T_inv_seq_full", ts_T_inv_seq_full)
+        # print("len", len(ts_T_inv_seq_full))
+        # print("ts_S_inv_seq_full", ts_S_inv_seq_full)
+        # print("len", len(ts_S_inv_seq_full))
         ##################  RKD LOSSES ##################
 
         rkd_loss = torch.tensor(0.0, device=device)
@@ -1158,23 +1227,20 @@ def train_student_uniform_xt(cfg: Dict):
             xt_S_inv_sam_H, _  = H_module(xt_S_inv_sam, t=torch.full((xt_S_inv.shape[0],), t_cur, device=device, dtype=torch.long))
 
 
-            xt_S = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
-            xt_S_inv = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
-            xt_S_inv_sam = denormalize_torch(xt_S_inv_sam, mu_student_tensor, sigma_student_tensor)
+            xt_S_de = denormalize_torch(xt_S, mu_student_tensor, sigma_student_tensor)
+            xt_S_inv_de = denormalize_torch(xt_S_inv, mu_student_tensor, sigma_student_tensor)
 
-            xt_S_H = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
-            xt_T = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
-            xt_S_inv_H = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
-            xt_T_inv = denormalize_torch(xt_T_inv, mu_teacher_tensor, sigma_teacher_tensor)
-            xt_S_inv_sam_H = denormalize_torch(xt_S_inv_sam_H, mu_student_tensor, sigma_student_tensor)
-            xt_T_inv_sam = denormalize_torch(xt_T_inv_sam, mu_teacher_tensor, sigma_teacher_tensor)
+            xt_S_H_de = denormalize_torch(xt_S_H, mu_student_tensor, sigma_student_tensor)
+            xt_T_de = denormalize_torch(xt_T, mu_teacher_tensor, sigma_teacher_tensor)
+            xt_S_inv_H_de = denormalize_torch(xt_S_inv_H, mu_student_tensor, sigma_student_tensor)
+            xt_T_inv_de = denormalize_torch(xt_T_inv, mu_teacher_tensor, sigma_teacher_tensor)
 
             # RKD
-            rkd_s_d = torch.pdist(xt_S_H, p=2).clamp_min(1e-12)           
-            rkd_t_d = torch.pdist(xt_T, p=2).clamp_min(1e-12)  
+            rkd_s_d = torch.pdist(xt_S_H_de, p=2).clamp_min(1e-12)           
+            rkd_t_d = torch.pdist(xt_T_de, p=2).clamp_min(1e-12)  
             # INV
-            s_full = torch.cdist(xt_S_H, xt_S_inv_H, p=2)  
-            t_full = torch.cdist(xt_T, xt_T_inv, p=2)  
+            s_full = torch.cdist(xt_S_H_de, xt_S_inv_H_de, p=2)  
+            t_full = torch.cdist(xt_T_de, xt_T_inv_de, p=2)  
             inv_s_d = s_full.reshape(-1).clamp_min(1e-12)            
             inv_t_d = t_full.reshape(-1).clamp_min(1e-12)
 
@@ -1194,8 +1260,8 @@ def train_student_uniform_xt(cfg: Dict):
             inv_t_d = inv_t_d / teacher_mean
 
             # FID
-            fid_student = fid_gaussian_torch(xt_S, xt_S_inv)
-            fid_teacher = fid_gaussian_torch(xt_T, xt_T_inv) 
+            fid_student = fid_gaussian_torch(xt_S_de, xt_S_inv_de)
+            fid_teacher = fid_gaussian_torch(xt_T_de, xt_T_inv_de) 
 
             # loss
             rkd_loss += cfg["W_RKD"] * F.mse_loss(rkd_s_d, rkd_t_d, reduction="mean") / len(xt_S_seq)
@@ -1203,25 +1269,9 @@ def train_student_uniform_xt(cfg: Dict):
             fid_loss += cfg["W_FID"] * (fid_student + fid_teacher) / len(xt_S_seq)
 
 
-    
             ####################### pair loss ##############################
 
-            L = len(T_inv_seq)
-            if L > 0:
-                teacher_pair_loss = torch.tensor(0.0, device=device)
-                student_pair_loss = torch.tensor(0.0, device=device)
-
-                for k in range(L):
-                    # Teacher 쪽: (1) Teacher inversion 궤적 vs (2) z_S에서 Teacher sampling 궤적
-                    teacher_pair_loss = teacher_pair_loss + F.mse_loss(
-                        xt_T_inv[k], xt_T_inv_sam[k]
-                    )
-                    # Student 쪽: (2) Student inversion 궤적 vs (1) z_T에서 Student sampling 궤적
-                    student_pair_loss = student_pair_loss + F.mse_loss(
-                        xt_S_inv[k], xt_S_inv_sam[k]
-                    )
-
-                pair_loss += cfg["W_PAIR"] * (teacher_pair_loss + student_pair_loss) / len(T_inv_seq)
+            pair_loss += cfg["W_PAIR"] * (F.mse_loss(xt_T_inv, xt_T_inv_sam) + F.mse_loss(xt_S_inv, xt_S_inv_sam)) / len(xt_S_seq)
 
         ################## TOTAL LOSS ##################
         loss = rkd_loss + inversion_loss + fid_loss + pair_loss
@@ -1237,7 +1287,7 @@ def train_student_uniform_xt(cfg: Dict):
         opt.step()
 
         if (step_i % 5 == 0) or (step_i == 1):
-            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   fid_loss={fid_loss.item():.6f}  pair_loss={pair_loss.item():.6f}  total={loss.item():.6f}")
 
 
         if cfg["use_wandb"]:
