@@ -22,10 +22,10 @@ import itertools
 
 W_RKD = 1.0
 W_INV = 1.0
-W_FID = 0.01
+W_FID = 0.0
 W_PAIR = 0.01
-CUDA_NUM = 5
-BATCH_SIZE = 1024
+CUDA_NUM = 2
+BATCH_SIZE = 4096
 
 WANDB_NAME=f"1117_lr1e4_n32_H_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_fidW{W_FID}_pairW{W_PAIR}_no_denorm"
 

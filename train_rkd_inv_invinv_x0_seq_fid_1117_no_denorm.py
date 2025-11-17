@@ -25,8 +25,8 @@ W_INV = 0.1
 W_INVINV = 1.0
 W_FID = 0.001
 W_DIFF = 0.0
-CUDA_NUM = 5
-BATCH_SIZE = 1024
+CUDA_NUM = 3
+BATCH_SIZE = 4096
 
 WANDB_NAME=f"1117_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}"
 
