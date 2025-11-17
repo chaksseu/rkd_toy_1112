@@ -17,7 +17,7 @@ def load_2d(path: Path):
 
 def main():
     ap = argparse.ArgumentParser(description="Compute per-dim mean/std for 2D data and save JSON")
-    ap.add_argument("--data", default="smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/train.npy", help="Path to train.npy or train.csv")
+    ap.add_argument("--data", default="smile_data_n32_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2/train.npy", help="Path to train.npy or train.csv")
     ap.add_argument("--out_json", default="normalization_stats.json", help="Output JSON filename")
     args = ap.parse_args()
 
