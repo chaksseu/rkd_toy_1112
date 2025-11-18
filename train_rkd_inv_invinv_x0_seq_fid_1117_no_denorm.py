@@ -24,7 +24,6 @@ W_RKD = 0.1
 W_INV = 0.1
 W_INVINV = 1.0
 W_FID = 0.001
-W_DIFF = 0.0
 CUDA_NUM = 3
 BATCH_SIZE = 4096
 
@@ -47,7 +46,6 @@ CONFIG = {
     "W_RKD": W_RKD,
     "W_INV": W_INV,                               # ε-pred MSE 가중치
     "W_INVINV": W_INVINV,                               # ε-pred MSE 가중치
-    "W_DIFF": W_DIFF,                               # ε-pred MSE 가중치
     "W_FID": W_FID,                               # ε-pred MSE 가중치
 
     "rkd_ddim_steps_to_t": 100,   # t_sel까지 최대 몇 번의 DDIM 전이만 사용할지
@@ -781,7 +779,6 @@ def train_student_uniform_xt(cfg: Dict):
         invinv_loss = torch.tensor(0.0, device=device)
         fid_loss = torch.tensor(0.0, device=device)
 
-        diff_loss = torch.tensor(0.0, device=device)
         
 
         for i, (xt_S, xt_T, xt_S_inv, xt_T_inv) in enumerate(zip(xt_S_seq, xt_T_seq, reversed(S_inv_z_seq[:-1]), x0_inv_T)):
@@ -833,18 +830,9 @@ def train_student_uniform_xt(cfg: Dict):
 
 
 
-        # # ===================== NEW: diffusion ε-MSE loss =====================
-        # t_b_s = torch.randint(low=0, high=T, size=(x0_batch.shape[0],), device=device, dtype=torch.long)
-        # eps = torch.randn_like(x0_batch)    
-        # x_t_for_diff = train_sched.add_noise(x0_batch, eps, t_b_s)  # q(x_t|x0, ε, t)
-        # eps_pred = student(x_t_for_diff, t_b_s)  # prediction_type='epsilon'
-
-        # diff_loss += cfg["W_DIFF"] * F.mse_loss(eps_pred, eps, reduction="mean")
-        # # ===============================
-
 
         ################## TOTAL LOSS ##################
-        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss + diff_loss
+        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss
 
 
         opt.zero_grad()
@@ -867,7 +855,6 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss/inv": float(inversion_loss),
                 "loss/invinv": float(invinv_loss),
                 "loss/fid": float(fid_loss),
-                "loss/diff_loss": float(diff_loss),
                 "lr": opt.param_groups[0]["lr"],
             }, step=step_i)
 
@@ -878,7 +865,6 @@ def train_student_uniform_xt(cfg: Dict):
                 "loss_raw/inv": float(inversion_loss) / cfg["W_INV"] if cfg["W_INV"] != 0 else 0.0,
                 "loss_raw/invinv": float(invinv_loss) / cfg["W_INVINV"] if cfg["W_INVINV"] != 0 else 0.0,
                 "loss_raw/fid": float(fid_loss) / cfg["W_FID"] if cfg["W_FID"] != 0 else 0.0,
-                "loss_raw/diff_loss": float(diff_loss) / cfg["W_DIFF"] if cfg["W_DIFF"] != 0 else 0.0
             }, step=step_i)
 
         # 7) (옵션) 시각화: 그대로 유지 (원 코드와 동일)
