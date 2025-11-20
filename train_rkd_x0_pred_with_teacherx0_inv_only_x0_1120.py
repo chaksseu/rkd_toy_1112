@@ -20,12 +20,14 @@ from torch.utils.data import Dataset, DataLoader
 import itertools
 # ===================== CONFIG ===================== #
 
-W_RKD = 1.0
-
+W_RKD = 0.1
+W_INV = 0.1
+W_INVINV = 1.0
+W_FID = 0.0001
 CUDA_NUM = 1
 BATCH_SIZE = 256
 
-WANDB_NAME=f"1119_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_x0_pred_rkd_with_teacher_x0"
+WANDB_NAME=f"1120_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
 
 
 CONFIG = {
@@ -42,7 +44,9 @@ CONFIG = {
 
     # diffusion loss 가중치
     "W_RKD": W_RKD,
-
+    "W_INV": W_INV,                               # ε-pred MSE 가중치
+    "W_INVINV": W_INVINV,                               # ε-pred MSE 가중치
+    "W_FID": W_FID,                               # ε-pred MSE 가중치
     "rkd_ddim_steps_to_t": 100,   # t_sel까지 최대 몇 번의 DDIM 전이만 사용할지
 
     "batch_size": BATCH_SIZE,
@@ -427,8 +431,9 @@ def sample_ddim_teacher(
         eps = model(x_in, t_b)
         out = local.step(model_output=eps, timestep=t, sample=x, eta=eta)
         x = out.prev_sample
+        pred_x0 = out.pred_original_sample
 
-        xs.append(x) 
+        xs.append(pred_x0) 
 
         if t_int <= t_sel:
             break
@@ -455,8 +460,9 @@ def sample_ddim_teacher_grad(
         eps = model(x_in, t_b)
         out = local.step(model_output=eps, timestep=t, sample=x, eta=eta)
         x = out.prev_sample
+        pred_x0 = out.pred_original_sample
 
-        xs.append(x) 
+        xs.append(pred_x0) 
 
         if t_int <= t_sel:
             break
@@ -484,8 +490,11 @@ def sample_ddim_inv_student(
         t_b = torch.full((x.shape[0],), int(t), device=device, dtype=torch.long)
         latent_in = inv.scale_model_input(x, t)
         eps = model(latent_in, t_b)
-        x = inv.step(eps, t, x).prev_sample
-        xs.append(x) 
+        out = inv.step(eps, t, x)
+        x = out.prev_sample
+        pred_x0 = out.pred_original_sample
+
+        xs.append(pred_x0) 
 
     return xs  
 
@@ -751,43 +760,85 @@ def train_student_uniform_xt(cfg: Dict):
             eta=float(cfg.get("ddim_eta", 0.0)), t_sel=t_sel,
         )
 
+
+        ##################  STUDENT DOMAIN DATA ##################
+        x0_batch = next_student_batch()  # shape (B_s, 2)
         student.train()
 
-        ##################  RKD LOSSES ##################
+        S_inv_z_seq = sample_ddim_inv_student(
+            model=student, sample_scheduler=ddim, x0=x0_batch, 
+            device=device, sample_steps=ddim_steps,
+            eta=float(cfg.get("ddim_eta", 0.0)),
+        )
+        x0_inv_T = sample_ddim_teacher_grad(
+            model=teacher, sample_scheduler=ddim, z=S_inv_z_seq[-1], 
+            device=device, sample_steps=ddim_steps,
+            eta=float(cfg.get("ddim_eta", 0.0)), t_sel=0,
+        )
 
+        ##################  RKD LOSSES ##################
         rkd_loss = torch.tensor(0.0, device=device)
-        
+        inversion_loss = torch.tensor(0.0, device=device)
+        invinv_loss = torch.tensor(0.0, device=device)
+        fid_loss = torch.tensor(0.0, device=device)
 
         xt_T = xt_T_seq[-1]
         xt_T_rep = xt_T.repeat(ddim_steps, 1)
+        # x0_inv_T = torch.stack(x0_inv_T, dim=0)
+        x0_inv_T_flat = x0_inv_T[-1]
 
         xt_S_seq = torch.stack(xt_S_seq, dim=0)
         xt_S_seq_flat = xt_S_seq.reshape(-1, xt_S_seq.shape[-1])
+        # xt_S_gt_rep = x0_batch.repeat(ddim_steps, 1)
+        xt_S_gt_rep = x0_batch
+
 
         xt_S_seq_flat = denormalize_torch(xt_S_seq_flat, mu_student_tensor, sigma_student_tensor)
         xt_T_rep = denormalize_torch(xt_T_rep, mu_teacher_tensor, sigma_teacher_tensor)
+        xt_S_gt_rep = denormalize_torch(xt_S_gt_rep, mu_student_tensor, sigma_student_tensor)
+        x0_inv_T_flat = denormalize_torch(x0_inv_T_flat, mu_teacher_tensor, sigma_teacher_tensor)
 
+
+        # RKD
         rkd_s_d = torch.pdist(xt_S_seq_flat, p=2).clamp_min(1e-12)           
         rkd_t_d = torch.pdist(xt_T_rep, p=2).clamp_min(1e-12)  
+        # INV
+        s_full = torch.cdist(xt_S_seq_flat, xt_S_gt_rep, p=2)  
+        t_full = torch.cdist(xt_T_rep, x0_inv_T_flat, p=2)  
+        inv_s_d = s_full.reshape(-1).clamp_min(1e-12)            
+        inv_t_d = t_full.reshape(-1).clamp_min(1e-12)
+        # INVINV
+        invinv_s_d = torch.pdist(xt_S_gt_rep, p=2).clamp_min(1e-12)           
+        invinv_t_d = torch.pdist(x0_inv_T_flat, p=2).clamp_min(1e-12)
 
-        # student mean
-        student_sum = rkd_s_d.sum()
-        student_cnt = rkd_s_d.numel()
-        student_mean = student_sum / student_cnt  
         # teacher mean
-        teacher_sum = rkd_t_d.sum() 
-        teacher_cnt = rkd_t_d.numel()
-        teacher_mean = teacher_sum / teacher_cnt
+        teacher_sum = rkd_t_d.sum() + inv_t_d.sum() + invinv_t_d.sum()
+        teacher_cnt = rkd_t_d.numel() + inv_t_d.numel() + invinv_t_d.numel()
+        teacher_mean = teacher_sum / teacher_cnt  
+        # student mean
+        student_sum = rkd_s_d.sum() + inv_s_d.sum() + invinv_s_d.sum()
+        student_cnt = rkd_s_d.numel() + inv_s_d.numel() + invinv_s_d.numel()
+        student_mean = student_sum / student_cnt  
 
         rkd_s_d = rkd_s_d / student_mean
         rkd_t_d = rkd_t_d / teacher_mean
-
-        # loss
-        rkd_loss += cfg["W_RKD"] * F.mse_loss(rkd_s_d, rkd_t_d, reduction="mean")
-
+        inv_s_d = inv_s_d / student_mean
+        inv_t_d = inv_t_d / teacher_mean
+        invinv_s_d = invinv_s_d / student_mean
+        invinv_t_d = invinv_t_d / teacher_mean
+        
+        # FID
+        fid_student = fid_gaussian_torch(xt_S_seq_flat, xt_S_gt_rep)
+        fid_teacher = fid_gaussian_torch(xt_T_rep, x0_inv_T_flat) 
+        
+        # losses
+        rkd_loss += cfg["W_RKD"] * F.mse_loss(rkd_s_d, rkd_t_d, reduction="mean") 
+        inversion_loss += cfg["W_INV"] * F.mse_loss(inv_s_d, inv_t_d, reduction="mean")
+        invinv_loss += cfg["W_INVINV"] * F.mse_loss(invinv_s_d, invinv_t_d, reduction="mean")
+        fid_loss += cfg["W_FID"] * (fid_student + fid_teacher)
 
         ################## TOTAL LOSS #################
-        loss = rkd_loss
+        loss = rkd_loss + inversion_loss + invinv_loss + fid_loss
 
 
         opt.zero_grad()
@@ -798,7 +849,7 @@ def train_student_uniform_xt(cfg: Dict):
 
         # if (step_i % max(1, total_steps // 20) == 0) or (step_i == 1):
         if (step_i % 5 == 0) or (step_i == 1):
-            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f} total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
 
 
         if cfg["use_wandb"]:
@@ -807,6 +858,9 @@ def train_student_uniform_xt(cfg: Dict):
                 "t": t_sel,
                 "loss/total": float(loss),
                 "loss/rkd": float(rkd_loss),
+                "loss/inv": float(inversion_loss),
+                "loss/invinv": float(invinv_loss),
+                "loss/fid": float(fid_loss),
                 "lr": opt.param_groups[0]["lr"],
             }, step=step_i)
 
@@ -814,7 +868,11 @@ def train_student_uniform_xt(cfg: Dict):
         if cfg["use_wandb"]:
             wandb.log({
                 "loss_raw/rkd": float(rkd_loss) / cfg["W_RKD"] if cfg["W_RKD"] != 0 else 0.0,
+                "loss_raw/inv": float(inversion_loss) / cfg["W_INV"] if cfg["W_INV"] != 0 else 0.0,
+                "loss_raw/invinv": float(invinv_loss) / cfg["W_INVINV"] if cfg["W_INVINV"] != 0 else 0.0,
+                "loss_raw/fid": float(fid_loss) / cfg["W_FID"] if cfg["W_FID"] != 0 else 0.0,
             }, step=step_i)
+
 
         # 7) (옵션) 시각화: 그대로 유지 (원 코드와 동일)
         if (step_i % cfg["vis_interval_epochs"] == 0) or (step_i == total_steps):

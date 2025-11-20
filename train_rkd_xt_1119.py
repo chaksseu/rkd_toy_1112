@@ -68,7 +68,7 @@ CONFIG = {
     # optim
     "lr": 1e-4, "weight_decay": 0.0, "max_grad_norm": 1.0,
     # sampling viz
-    "vis_interval_epochs": 1000,
+    "vis_interval_epochs": 5000,
     "n_vis": 8192,       # 경로를 수집/표시할 noise 개수
     "ddim_eta": 0.0,
     # wandb
