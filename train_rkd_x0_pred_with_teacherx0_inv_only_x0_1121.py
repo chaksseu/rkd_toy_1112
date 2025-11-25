@@ -24,16 +24,16 @@ import itertools
 # W_FID = 0.0001
 # W_SAME = 0.01
 
-W_RKD = 1.0
+W_RKD = 0.1
 W_INV = 0.0
-W_INVINV = 0.0
+W_INVINV = 1.0
 W_FID = 0.0
-W_SAME = 0.01
+W_SAME = 0.00001
 
-CUDA_NUM = 1
+CUDA_NUM = 2
 BATCH_SIZE = 1024
 
-WANDB_NAME=f"1121_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_sameW{W_SAME}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
+WANDB_NAME=f"1123_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_sameW{W_SAME}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
 
 
 CONFIG = {
@@ -87,7 +87,7 @@ CONFIG = {
     "ddim_eta": 0.0,
     # wandb
     "use_wandb": True,
-    "wandb_project": "RKD-DKDM-AICA-1121",
+    "wandb_project": "RKD-DKDM-AICA-1123",
     "wandb_run_name": WANDB_NAME,
 }
 

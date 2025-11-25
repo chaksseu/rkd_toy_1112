@@ -615,13 +615,19 @@ def visualize_student_ddim_trajectories(cfg: dict,
 
     print(f"[DONE] out dir: {out_traj.resolve()}")
 
+
+# 1124
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW1e-05_x0_pred_rkd_with_teacher_x0_inv_only_x0
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0
+
 # ===================== ARGS / ENTRY ===================== #
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Visualize Student DDIM trajectories + pure score field (norm / denorm / H)."
     )
     parser.add_argument("--ckpt", type=str,
-        default="runs/1117_lr1e4_n32_H_b1024_ddim_50_150_steps_no_init_rkdW1.0_invW1.0_fidW0.01_pairW0.01_no_denorm/ckpt_student_step080000.pt",
+        default="runs/1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW1e-05_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step014000.pt",
         help="Path to student checkpoint .pt."
     )
     parser.add_argument("--n", type=int, default=32, help="Number of pure noise samples.")
@@ -632,11 +638,12 @@ def parse_args():
     parser.add_argument("--gif", type=bool, default=True,
                         help="Make GIFs for norm / denorm / H.")
     parser.add_argument("--out", type=str,
-                        default="vis_traj_rkd",
+                        default="vis_traj_rkd_x0_pred_only_with_teacher_x0_inv_invinv_fd",
                         help="Output directory root.")
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
     parser.add_argument("--student-stats", type=str,
-                        default="smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/normalization_stats.json",
+                        # default="smile_data_n8192_scale10_rot0_trans_0_0_H_32_-13_100_55_8_200_0.05_0.005_1.2_n32/normalization_stats.json",
+                        default="smile_data_n32_scale2_rot60_trans_50_-20/normalization_stats.json",
                         # e.g. "smile_data_n8192_scale10_rot0_trans_0_0_H_32/normalization_stats.json",
                         help="JSON with {'mean':[...],'std':[...]} for student denorm.")
 
@@ -649,7 +656,7 @@ def parse_args():
                         help="Streamplot density.")
 
     # H-module ckpt
-    parser.add_argument("--H-ckpt", type=str, default="runs/1117_lr1e4_n32_H_b1024_ddim_50_150_steps_no_init_rkdW1.0_invW1.0_fidW0.01_pairW0.01_no_denorm/ckpt_H_step080000.pt",
+    parser.add_argument("--H-ckpt", type=str, default="runs/1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW1e-05_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_H_step014000.pt",
                         help="Path to ckpt_H_stepXXXXX.pt (LearnableHomography state_dict).")
     parser.add_argument("--H-eps", type=float, default=1e-6,
                         help="Small epsilon used inside H-module for W division stability.")

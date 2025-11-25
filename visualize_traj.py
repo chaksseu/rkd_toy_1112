@@ -399,11 +399,18 @@ def visualize_student_ddim_trajectories(cfg: dict,
 # 1122
 # runs/1121_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW1.0_invW0.0_invinvW0.0_fidW0.0_sameW0.01_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step025000.pt
 
+# # 1124
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.0_invinvW0.0_fidW0.0_sameW1e-05_x0_pred_rkd_with_teacher_x0_inv_only_x0
+# 1124_lr1e4_n32_b2048_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0
+
+# runs/1121_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001_sameW0.0001_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step095000.pt
+
 # ===================== ARGS / ENTRY ===================== #
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Student DDIM trajectories + pure score field (norm & denorm).")
     parser.add_argument("--ckpt", type=str,
-        default="runs/1121_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW1.0_invW0.0_invinvW0.0_fidW0.0_sameW0.01_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step025000.pt",
+        default="runs/1121_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.1_invW0.1_invinvW1.0_fidW0.0001_sameW0.0001_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step095000.pt",
         help="Path to student checkpoint .pt.")
     parser.add_argument("--n", type=int, default=32, help="Number of pure noise samples.")
     parser.add_argument("--steps", type=int, default=100, help="DDIM sampling steps.")
@@ -411,7 +418,7 @@ def parse_args():
     # bool 인자 (요청대로 str2bool 제거; 단, CLI에서 'False'를 문자열로 주면 True로 해석될 수 있으니 유의)
     parser.add_argument("--frames", type=bool, default=True, help="Save per-timestep frames for both norm/denorm.")
     parser.add_argument("--gif", type=bool, default=True, help="Make GIFs (norm/denorm).")
-    parser.add_argument("--out", type=str, default="vis_traj_rkd_pred_x0_with_same_loss", help="Output directory root.")
+    parser.add_argument("--out", type=str, default="vis_traj_miss_rkd_x0_pred_only_with_teacher_x0_inv_invinv_fd_same", help="Output directory root.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--student-stats", type=str,
                         # default=None,

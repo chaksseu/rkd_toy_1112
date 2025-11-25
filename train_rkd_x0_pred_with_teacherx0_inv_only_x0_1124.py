@@ -28,10 +28,10 @@ W_RKD = 0.1
 W_INV = 0.1
 W_INVINV = 1.0
 W_FID = 0.0001
-W_SAME = 0.00001
+W_SAME = 0.0
 
-CUDA_NUM = 0
-BATCH_SIZE = 1024
+CUDA_NUM = 2
+BATCH_SIZE = 2048
 
 WANDB_NAME=f"1124_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_sameW{W_SAME}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
 
@@ -862,7 +862,7 @@ def train_student_uniform_xt(cfg: Dict):
         # --- FID  ---
         if cfg["W_FID"] != 0:
             fid_student = fid_gaussian_torch(xt_S_seq_denorm[-1], x0_batch_denorm)
-            fid_teacher = fid_gaussian_torch(x0_inv_T_denorm, x0_inv_T_denorm)
+            fid_teacher = fid_gaussian_torch(xt_T_x0_denorm, x0_inv_T_denorm)
         else:
             fid_student = torch.tensor(0.0, device=device)
             fid_teacher = torch.tensor(0.0, device=device)
