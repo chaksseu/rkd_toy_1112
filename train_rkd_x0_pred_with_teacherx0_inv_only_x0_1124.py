@@ -24,16 +24,16 @@ import itertools
 # W_FID = 0.0001
 # W_SAME = 0.01
 
-W_RKD = 0.1
+W_RKD = 0.05
 W_INV = 0.1
 W_INVINV = 1.0
-W_FID = 0.0001
-W_SAME = 0.0
+W_FID = 0.0005
+W_SAME = 10.0
 
-CUDA_NUM = 2
-BATCH_SIZE = 2048
+CUDA_NUM = 0
+BATCH_SIZE = 1024
 
-WANDB_NAME=f"1124_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_sameW{W_SAME}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
+WANDB_NAME=f"1201_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps_no_init_rkdW{W_RKD}_invW{W_INV}_invinvW{W_INVINV}_fidW{W_FID}_sameW{W_SAME}_x0_pred_rkd_with_teacher_x0_inv_only_x0"
 
 
 CONFIG = {
@@ -82,12 +82,12 @@ CONFIG = {
     # optim
     "lr": 1e-4, "weight_decay": 0.0, "max_grad_norm": 1.0,
     # sampling viz
-    "vis_interval_epochs": 2000,
+    "vis_interval_epochs": 5000,
     "n_vis": 8192,       # 경로를 수집/표시할 noise 개수
     "ddim_eta": 0.0,
     # wandb
     "use_wandb": True,
-    "wandb_project": "RKD-DKDM-AICA-1124",
+    "wandb_project": "RKD-DKDM-AICA-1130",
     "wandb_run_name": WANDB_NAME,
 }
 
@@ -917,7 +917,7 @@ def train_student_uniform_xt(cfg: Dict):
 
         # if (step_i % max(1, total_steps // 20) == 0) or (step_i == 1):
         if (step_i % 10 == 0) or (step_i == 1):
-            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  x0_S_same={x0_S_same_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] rkd={rkd_loss.item():.6f}  x0_S_same={x0_S_same_loss.item():.6f}  inv={inversion_loss.item():.6f}   invinv={invinv_loss.item():.6f}  fid_T_loss={fid_teacher.item():.6f}  fid_S_loss={fid_student.item():.6f}  fid_loss={fid_loss.item():.6f}  total={loss.item():.6f}")
 
 
         if cfg["use_wandb"]:
