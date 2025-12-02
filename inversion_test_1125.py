@@ -500,13 +500,13 @@ def ddim_resample(
 
 # 1201
 # runs/1130_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.08_invW0.1_invinvW1.0_fidW0.0005_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step090000.pt
-
+# runs/1201_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.08_invW0.1_invinvW1.0_fidW0.0005_sameW0.0001_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step060000.pt
 
 def main():
     parser = argparse.ArgumentParser(description="Batch DDIM Inversion → Resampling for .npy data")
     parser.add_argument("--npy", type=str, default="smile_data_n32_scale2_rot60_trans_50_-20/train.npy", help="Path to x0 .npy file (shape [N, D])")
-    parser.add_argument("--teacher_ckpt", type=str, default="runs/1130_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.08_invW0.1_invinvW1.0_fidW0.0005_sameW0.0_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step090000.pt", help="Path to teacher checkpoint")
-    parser.add_argument("--out_dir", type=str, default="inversion_test_1201_rkd0.08_inv0.1_invinv1.0_fd0.0005_same0.0", help="Output directory")
+    parser.add_argument("--teacher_ckpt", type=str, default="runs/1201_lr1e4_n32_b1024_ddim_50_150_steps_no_init_rkdW0.08_invW0.1_invinvW1.0_fidW0.0005_sameW0.0001_x0_pred_rkd_with_teacher_x0_inv_only_x0/ckpt_student_step065000.pt", help="Path to teacher checkpoint")
+    parser.add_argument("--out_dir", type=str, default="inversion_test_1201_rkd0.08_inv0.1_invinv1.0_fd0.0005_same1e-4", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--T", type=int, default=1000, help="num_train_timesteps used in training")
     parser.add_argument("--steps", type=int, default=100, help="DDIM steps (sampling/inversion)")
