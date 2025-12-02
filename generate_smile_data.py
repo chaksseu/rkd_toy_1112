@@ -113,10 +113,10 @@ def save_heatmap(xy: np.ndarray, path: Path, bins: int = 128):
     plt.close()
 
 NUM=65536
-SCALE=10
-ROTATION=0
-TRANS_X=0
-TRANS_Y=0
+SCALE=2
+ROTATION=60
+TRANS_X=50
+TRANS_Y=-20
 
 def main():
     ap = argparse.ArgumentParser(description="Generate 2D Smile Distribution")

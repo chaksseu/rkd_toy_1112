@@ -121,8 +121,8 @@ def sample_x0_ddim(model: nn.Module, scheduler: DDIMScheduler, num_samples: int,
                    sample_steps: int, dim: int = 2, eta: float = 0.0):
     """DDIM sampling producing x0 from N(0, I)."""
     scheduler.set_timesteps(sample_steps, device=device)
-    print(scheduler.config.timestep_spacing)
-    print("scheduler.timesteps", scheduler.timesteps)
+    # print(scheduler.config.timestep_spacing)
+    # print("scheduler.timesteps", scheduler.timesteps)
     x = torch.randn(num_samples, dim, device=device)
     for t in scheduler.timesteps:  # [T-1, ..., 0]
         t_b = torch.full((num_samples,), int(t), device=device, dtype=torch.long)
@@ -134,72 +134,77 @@ def sample_x0_ddim(model: nn.Module, scheduler: DDIMScheduler, num_samples: int,
 # -------------------- Main -------------------- #
 
 
-DDIM_STEP=100
+
 def main():
-    p = argparse.ArgumentParser()
-    p.add_argument("--ckpt", default="ckpt_teacher8192_T1000_1e5_step530000.pt", type=str, help="Path to model checkpoint (.pt)")
-    p.add_argument("--norm-stats", default="smile_data_n8192_scale10_rot0_trans_0_0/teacher_normalization_stats.json", type=str, help="Path to teacher_normalization_stats.json")
-    p.add_argument("--out", default=f"vis_ddim", type=str, help="Output directory for PNG")
-    p.add_argument("--T", default=1000, type=int, help="Training total diffusion steps (0..T-1)")
-    p.add_argument("--ddim-steps", default=DDIM_STEP, type=int, help="Number of DDIM inference steps")
-    p.add_argument("--eta", default=0.0, type=float, help="DDIM eta (0 = deterministic)")
-    p.add_argument("--num-samples", default=8192, type=int, help="Number of samples")
-    p.add_argument("--seed", default=42, type=int)
-    p.add_argument("--device", default="cuda:0", type=str)
-    p.add_argument("--dim", default=2, type=int)
-    p.add_argument("--time-dim", default=64, type=int)
-    p.add_argument("--hidden", default=256, type=int)
-    p.add_argument("--depth", default=8, type=int)
-    p.add_argument("--dpi", default=150, type=int)
-    p.add_argument("--title", default="DDIM Samples (x0)", type=str)
-    p.add_argument("--filename", default=f"ddim_samples{DDIM_STEP}.png", type=str)
-    args = p.parse_args()
+    TT = 50
+    
+    for DDIM_STEP in [10,15,20,25,30,35,40,45,50,60,70,80,90,100,110,120,130,140,150,160,170,180,190,200]:
+        # DDIM_STEP = TT // 4
 
-    set_seed(args.seed)
-    out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
+        p = argparse.ArgumentParser()
+        p.add_argument("--ckpt", default=f"runs/1202_only_diff_loss_B1024_teacher65536_T{TT}/ckpt_student_step680000.pt", type=str, help="Path to model checkpoint (.pt)")
+        p.add_argument("--norm-stats", default="smile_data_n65536_scale10_rot0_trans_0_0/normalization_stats.json", type=str, help="Path to teacher_normalization_stats.json")
+        p.add_argument("--out", default=f"vis_ddim_sample/vis_ddim_teacher_T{TT}", type=str, help="Output directory for PNG")
+        p.add_argument("--T", default=TT, type=int, help="Training total diffusion steps (0..T-1)")
+        p.add_argument("--ddim-steps", default=DDIM_STEP, type=int, help="Number of DDIM inference steps")
+        p.add_argument("--eta", default=0.0, type=float, help="DDIM eta (0 = deterministic)")
+        p.add_argument("--num-samples", default=8192, type=int, help="Number of samples")
+        p.add_argument("--seed", default=42, type=int)
+        p.add_argument("--device", default="cuda:0", type=str)
+        p.add_argument("--dim", default=2, type=int)
+        p.add_argument("--time-dim", default=64, type=int)
+        p.add_argument("--hidden", default=256, type=int)
+        p.add_argument("--depth", default=8, type=int)
+        p.add_argument("--dpi", default=150, type=int)
+        p.add_argument("--title", default="DDIM Samples (x0)", type=str)
+        p.add_argument("--filename", default=f"ddim_samples{DDIM_STEP}.png", type=str)
+        args = p.parse_args()
 
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+        set_seed(args.seed)
+        out_dir = Path(args.out); out_dir.mkdir(parents=True, exist_ok=True)
 
-    # schedulers
-    train_sched, sample_sched = build_schedulers(args.T)
+        device = torch.device(args.device if torch.cuda.is_available() else "cpu")
 
-    # model
-    model = MLPDenoiser(in_dim=args.dim, time_dim=args.time_dim, hidden=args.hidden, depth=args.depth, out_dim=args.dim)
-    ckpt_path = Path(args.ckpt)
-    sd = torch.load(ckpt_path, map_location="cpu")
-    model.load_state_dict(sd, strict=True)
-    model.to(device).eval()
+        # schedulers
+        train_sched, sample_sched = build_schedulers(args.T)
 
-    # sampling
-    x0 = sample_x0_ddim(
-        model=model,
-        scheduler=sample_sched,
-        num_samples=args.num_samples,
-        device=device,
-        sample_steps=args.ddim_steps,
-        dim=args.dim,
-        eta=args.eta,
-    )
+        # model
+        model = MLPDenoiser(in_dim=args.dim, time_dim=args.time_dim, hidden=args.hidden, depth=args.depth, out_dim=args.dim)
+        ckpt_path = Path(args.ckpt)
+        sd = torch.load(ckpt_path, map_location="cpu")
+        model.load_state_dict(sd, strict=True)
+        model.to(device).eval()
 
-    # denormalize for plotting if stats provided
-    mu, sigma = load_norm_stats(args.norm_stats)
-    x0_np = x0.detach().cpu().numpy()
-    x0_plot = denormalize_np(x0_np, mu, sigma)
+        # sampling
+        x0 = sample_x0_ddim(
+            model=model,
+            scheduler=sample_sched,
+            num_samples=args.num_samples,
+            device=device,
+            sample_steps=args.ddim_steps,
+            dim=args.dim,
+            eta=args.eta,
+        )
 
-    # plot & save (square limits)
-    fig = plt.figure(figsize=(4, 4))
-    ax = plt.gca()
-    ax.scatter(x0_plot[:, 0], x0_plot[:, 1], s=6, edgecolors="none")
-    ax.set_aspect("equal", adjustable="box")
-    xlim, ylim = _square_limits_from(x0_plot, pad_ratio=0.05)
-    ax.set_xlim(*xlim); ax.set_ylim(*ylim)
-    ax.set_title(f"{args.title}\nsteps={args.ddim_steps}, eta={args.eta}, N={args.num_samples}")
-    fig.tight_layout()
-    out_path = out_dir / args.filename
-    fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
-    plt.close(fig)
+        # denormalize for plotting if stats provided
+        mu, sigma = load_norm_stats(args.norm_stats)
+        x0_np = x0.detach().cpu().numpy()
+        x0_plot = denormalize_np(x0_np, mu, sigma)
 
-    print(f"[OK] Saved: {out_path.resolve()}")
+        # plot & save (square limits)
+        fig = plt.figure(figsize=(4, 4))
+        ax = plt.gca()
+        ax.scatter(x0_plot[:, 0], x0_plot[:, 1], s=6, edgecolors="none")
+        ax.set_aspect("equal", adjustable="box")
+        xlim, ylim = _square_limits_from(x0_plot, pad_ratio=0.05)
+        ax.set_xlim(*xlim); ax.set_ylim(*ylim)
+        ax.set_title(f"{args.title}\nsteps={args.ddim_steps}, eta={args.eta}, N={args.num_samples}")
+        fig.tight_layout()
+        out_path = out_dir / args.filename
+        fig.savefig(out_path, dpi=args.dpi, bbox_inches="tight")
+        plt.close(fig)
+
+        print(f"[OK] Saved: {out_path.resolve()}")
 
 if __name__ == "__main__":
     main()

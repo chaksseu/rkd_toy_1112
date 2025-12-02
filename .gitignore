@@ -6,7 +6,11 @@ ddpm_cifar10_rgb/
 checkpoints/
 logs/
 runs/
-vis_traj_rkd_*/
+vis_ddim_*/
+inversion_test_*/
+vis_traj_*/
+
+
 
 # 파일 확장자
 *.pt

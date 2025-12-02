@@ -20,7 +20,6 @@ import colorsys
 import numpy as np
 
 
-
 # ---- 32 distinct colors (high-contrast) ----
 import colorsys
 

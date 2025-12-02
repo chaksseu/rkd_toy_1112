@@ -18,14 +18,17 @@ import matplotlib.pyplot as plt
 from diffusers import DDPMScheduler, DDIMScheduler
 
 # ===================== CONFIG ===================== #
-CUDA_NUM = 0
+CUDA_NUM = 7
 BATCH_SIZE = 1024
+TT=50
+
 WANDB_NAME = f"1117_lr1e4_n32_b{BATCH_SIZE}_ddim_50_150_steps"
+
 
 CONFIG = {
     "device": f"cuda:{CUDA_NUM}",
     "out_dir": f"runs/{WANDB_NAME}",
-    "T": 1000,
+    "T": TT,
     "seed": 42,
     "dim": 2,
     "student_hidden": 256,
@@ -415,7 +418,6 @@ def visualize_student_ddim_trajectories(cfg: dict,
 
 # ===================== ARGS / ENTRY ===================== #
 
-TT=50
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Visualize Student DDIM trajectories + pure score field (norm & denorm).")
@@ -423,7 +425,7 @@ def parse_args():
         default=f"runs/1202_only_diff_loss_B1024_teacher65536_T{TT}/ckpt_student_step600000.pt",
         help="Path to student checkpoint .pt.")
     parser.add_argument("--n", type=int, default=32, help="Number of pure noise samples.")
-    parser.add_argument("--steps", type=int, default=100, help="DDIM sampling steps.")
+    parser.add_argument("--steps", type=int, default=35, help="DDIM sampling steps.")
     parser.add_argument("--eta", type=float, default=0.0, help="DDIM eta.")
     # bool 인자 (요청대로 str2bool 제거; 단, CLI에서 'False'를 문자열로 주면 True로 해석될 수 있으니 유의)
     parser.add_argument("--frames", type=bool, default=True, help="Save per-timestep frames for both norm/denorm.")
@@ -432,7 +434,7 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--student-stats", type=str,
                         # default=None,
-                        default="smile_data_n32_scale2_rot60_trans_50_-20/normalization_stats.json",
+                        default="smile_data_n65536_scale10_rot0_trans_0_0/normalization_stats.json",
                         help="JSON with {'mean':[...],'std':[...]} for denorm.")
 
     # Pure score field 옵션
