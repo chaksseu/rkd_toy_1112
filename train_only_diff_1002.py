@@ -22,34 +22,34 @@ import itertools
 
 # WANDB_NAME=f"1002_rkd_xt_b512_init_full_diff_loss_w100"0
 # WANDB_NAME=f"1002_rkd_xt_b512_init_full"
-WANDB_NAME=f"1002_only_diff_loss_teacher8192"
+
+TT = 400
+WANDB_NAME=f"1202_only_diff_loss_B256_teacher65536_T{TT}"
 # WANDB_NAME=f"1002_only_diff_loss_student16"
 
 CONFIG = {
     # I/O
-    "device": f"cuda:1",
+    "device": f"cuda:5",
     "out_dir": f"runs/{WANDB_NAME}",
     # teacher / student
-    "teacher_ckpt": "runs/1002_only_diff_loss_teacher8192/ckpt_student_step500000.pt",  # REQUIRED
+    "teacher_ckpt": "ckpt_teacher_T1000_step370000_1021.pt",  # REQUIRED
     "student_init_ckpt": "",                     
     # "student_init_ckpt": "runs/1002_only_diff_loss_student8/ckpt_student_step500000.pt",                     
     "resume_student_ckpt": f"",        
-    "teacher_data_stats": "smile_data_n8192_scale10_rot0_trans_0_0/teacher_normalization_stats.json",
+    "teacher_data_stats": "smile_data_n65536_scale10_rot0_trans_0_0/normalization_stats.json",
 
     # diffusion loss 가중치
     "W_DIFF": 1.0,                               # ε-pred MSE 가중치
 
-    "batch_size": 512,
+    "batch_size": 256,
     "num_noises": 8192, 
     "epochs_total": 1000000,          # 총 스텝 수 (기존 epochs_per_stage 대신 사용)
-    "student_grad_mode": "last",   # "full" | "last"
-    "student_grad_last_k": 50,      # 확장 옵션: "last"일 때 뒤에서 k스텝만 grad (기본 1)
 
     "noise_pool_file": None,        # None이면 out_dir/data/noises_pool.npy 로 저장
     "regen_noise_pool": False,      # True면 항상 새로 만듦
     
     # schedule / time
-    "T": 50,                 # total diffusion steps (timesteps = 0..T-1)
+    "T": TT,                 # total diffusion steps (timesteps = 0..T-1)
 
     "seed": 42,
     # RKD weights
@@ -65,22 +65,22 @@ CONFIG = {
     # optim
     "lr": 1e-4, "weight_decay": 0.0, "max_grad_norm": 1.0,
     # sampling viz
-    "vis_interval_epochs": 10000,
+    "vis_interval_epochs": 20000,
     "n_vis": 8192,       # 경로를 수집/표시할 noise 개수
     "ddim_steps": 25,
     "ddim_eta": 0.0,
     # wandb
     "use_wandb": True,
-    "wandb_project": "RKD-DKDM-AICA-1002",
+    "wandb_project": "RKD-DKDM-AICA-1202-Teacher",
     "wandb_run_name": WANDB_NAME,
 }
 
 CONFIG.update({
     # student 데이터 경로/형식
     # "student_data_path": "smile_data_n16_scale2_rot60_trans_50_-20/train.npy",   # 혹은 .csv
-    "student_data_path": "smile_data_n8192_scale10_rot0_trans_0_0/train.npy",   # 혹은 .csv
+    "student_data_path": "smile_data_n65536_scale10_rot0_trans_0_0/train.npy",   # 혹은 .csv
     "student_data_format": "npy",                # "npy" | "csv"
-    "student_dataset_batch_size": 512,          # 없으면 batch_size 사용
+    "student_dataset_batch_size": 256,          # 없으면 batch_size 사용
 })
 
 # ===================== UTILS ===================== #
@@ -668,32 +668,7 @@ def train_student_uniform_xt(cfg: Dict):
     B = int(cfg["batch_size"])
 
     for step_i in range(1, total_steps + 1):
-        # # 1) t ~ Uniform{0..T-1} (배치 내 동일)
-        # t_sel = int(np.random.randint(0, T-1))
-        # t_sel = torch.full((B,), t_sel, device=device, dtype=torch.long)      
 
-        # # z 샘플
-        # # 동일 노이즈 안에서만 사용하므로 오버피팅 역할
-        # z = sample_noise_batch(noise_pool, B, device)
-
-        # # Teacher: 배치별 타겟 t로 x_t^T (no_grad)
-        # with torch.no_grad():
-        #     xt_T = sample_ddim_teacher(teacher, ddim, z, t_sel, device=device, sample_steps=T)
-
-        # # Student: x_t^S, x_{t+1}^S
-        # student.train()
-        # xt_S = sample_ddim_student(
-        #     model=student, sample_scheduler=ddim, z=z, t_idx=t_sel, grad_t=int(cfg.get("student_grad_last_k", 1)), device=device, sample_steps=T
-        #     )
-
-        # # 기존 RKD (같은 t 내 배치-페어)
-        # parts_same_t = loss_rkd_xt(
-        #     xt_S, xt_S, xt_T, xt_T,
-        #     use_mu_norm=cfg["use_mu_normalization"],
-        #     w_rkd=cfg["W_RKD"], w_norm=cfg["W_NORM"]
-        # )
-        # same_t_loss = parts_same_t["total"]
-        same_t_loss = torch.zeros((), device=device)
 
         # ===================== NEW: diffusion ε-MSE loss =====================
         # 학생 도메인 x0 배치 가져오기 (정규화 완료 상태)
@@ -716,7 +691,7 @@ def train_student_uniform_xt(cfg: Dict):
         diff_loss = cfg["W_DIFF"] * F.mse_loss(eps_pred, eps, reduction="mean")
         # ===============================
 
-        loss = same_t_loss + diff_loss
+        loss = diff_loss
 
 
         opt.zero_grad()
@@ -726,61 +701,17 @@ def train_student_uniform_xt(cfg: Dict):
         opt.step()
 
         if (step_i % max(1, total_steps // 20) == 0) or (step_i == 1):
-            # print(f"[step {step_i:06d}] t={t_sel} rkd={same_t_loss.item():.6f}  diff={diff_loss.item():.6f}  total={loss.item():.6f}")
-            print(f"[step {step_i:06d}] rkd={same_t_loss.item():.6f}  diff={diff_loss.item():.6f}  total={loss.item():.6f}")
+            print(f"[step {step_i:06d}] diff={diff_loss.item():.6f}  total={loss.item():.6f}")
 
 
-        # if cfg["use_wandb"]:
-        #     wandb.log({
-        #         "step": step_i,
-        #         "t": t_sel,
-        #         "loss/total": float(loss),
-        #         "loss/rkd": float(same_t_loss),
-        #         "loss/diff": float(diff_loss),
-        #         f"loss_by_t/rkd/t{t_sel:02d}": float(same_t_loss),
-        #         f"loss_by_t/diff/t{t_sel:02d}": float(diff_loss),
-        #         "lr": opt.param_groups[0]["lr"],
-        #     }, step=step_i)
 
         if cfg["use_wandb"]:
             wandb.log({
                 "step": step_i,
                 "loss/total": float(loss),
-                "loss/rkd": float(same_t_loss),
                 "loss/diff": float(diff_loss),
                 "lr": opt.param_groups[0]["lr"],
             }, step=step_i)
-
-        # # 7) (옵션) 시각화: 그대로 유지 (원 코드와 동일)
-        # if (step_i % cfg["vis_interval_epochs"] == 0) or (step_i == total_steps):
-        #     with torch.no_grad():
-        #         B_plot = min(int(cfg.get("n_vis", 1024)), B)
-        #         z_vis  = sample_noise_batch(noise_pool, B_plot, device)
-
-        #         seq_T, ts = collect_xt_seq_ddim(teacher, ddim, z_vis, t_stop=0, return_ts=True)
-        #         seq_S, _  = collect_xt_seq_ddim(student.eval(), ddim, z_vis, t_stop=0, return_ts=True)
-
-        #         stride = max(1, int(cfg.get("vis_xt_stride", 1)))
-        #         idxs = np.arange(0, len(ts), stride)
-        #         seq_T_s = seq_T[idxs]
-        #         seq_S_s = seq_S[idxs]
-        #         ts_s    = ts[idxs]
-
-
-        #         seq_T_s_plot = denormalize_np(seq_T_s, mu_teacher, sigma_teacher)
-        #         seq_S_s_plot = denormalize_np(seq_S_s, mu_teacher, sigma_teacher)
-                
-        #         _ = save_and_log_xt_pairs_for_all_t(
-        #             left_seq   = seq_T_s_plot,
-        #             right_seq  = seq_S_s_plot,
-        #             ts         = ts_s,
-        #             noise_ids  = np.arange(B_plot),
-        #             out_dir    = out_dir,
-        #             step_i     = step_i,
-        #             sync_axes  = bool(cfg.get("vis_xt_sync_axes", False)),
-        #             dot_size   = 6,
-        #             use_wandb  = bool(cfg["use_wandb"]),
-        #         )
 
         # 7) (옵션) 시각화: 랜덤 노이즈에서 학생 모델로 x0 샘플링하여 저장
         if (step_i % cfg["vis_interval_epochs"] == 0) or (step_i == total_steps):
